@@ -6,8 +6,8 @@
   BlobSource,
   Mp4OutputFormat,
   BufferTarget,
-  Quality,
 } from 'https://esm.sh/mediabunny@1.61.0';
+import { patchMP4 } from './patcher.js';
 
 const $ = (id) => document.getElementById(id);
 const dropZone       = $('dropZone');
@@ -16,14 +16,19 @@ const readyPreview   = $('readyPreview');
 const readyName      = $('readyName');
 const readySize      = $('readySize');
 const readyMeta      = $('readyMeta');
+const activeModeTag  = $('activeModeTag');
 const pctText        = $('pctText');
 const encStatus      = $('encStatus');
+const encEyebrow     = $('encEyebrow');
 const barFill        = $('barFill');
+const doneTitle      = $('doneTitle');
 const doneElapsed    = $('doneElapsed');
 const doneOrigSize   = $('doneOrigSize');
 const doneOutSize    = $('doneOutSize');
 const doneBadge      = $('doneBadge');
 const doneSaveNote   = $('doneSaveNote');
+const doneOutCard    = $('doneOutCard');
+const uploadTips     = $('uploadTips');
 const doneOrigVid    = $('doneOrigVid');
 const doneOutVid     = $('doneOutVid');
 const btnDownload    = $('btnDownload');
@@ -32,24 +37,19 @@ const btnChangeFile  = $('btnChangeFile');
 const btnAgain       = $('btnAgain');
 const btnRetry       = $('btnRetry');
 const errMsg         = $('errMsg');
+const btnContinue    = $('btnContinue');
+const btnBackWizard  = $('btnBackWizard');
+const advancedWarning = $('advancedWarning');
 
-if (typeof window.VideoEncoder === 'undefined') {
-  alert(
-    'Your browser does not support WebCodecs VideoEncoder. ' +
-    'Please use Chrome, Edge, or Safari 16.4+. ' +
-    'Firefox is not supported.'
-  );
-  throw new Error('VideoEncoder not supported');
-}
-
-const VIDEO_QUALITY = new Quality({ quantizer: 22, bitrate: 12_000_000 });
-const TARGET_WIDTH  = 1920;
-const TARGET_HEIGHT = 1080;
+const NORMAL_BITRATE = 12_000_000;
+const NORMAL_MAX_H   = 1080;
 
 let currentBlob = null;
 let sourceUrl   = null;
 let outUrl      = null;
 let startedAt   = 0;
+let sourceH     = 0;
+let activeMode  = null;   // 'standard' | 'advanced'
 
 const humanSize = (b) => {
   const u = ['B','KB','MB','GB','TB']; let i = 0, n = Number(b) || 0;
@@ -79,7 +79,10 @@ function showView(name) {
 }
 
 function setEngineBadge(mode) {
-  const labels = { idle: 'Ready', loading: 'Encoding…', gpu: 'GPU encoder', cpu: 'CPU encoder' };
+  const labels = {
+    idle: 'Ready', loading: 'Working…',
+    gpu: 'GPU encoder', patch: 'MP4 patcher',
+  };
   $('engDot').dataset.state = mode;
   $('engText').textContent  = labels[mode] || 'Ready';
 }
@@ -88,9 +91,34 @@ function resetSession() {
   if (sourceUrl) { URL.revokeObjectURL(sourceUrl); sourceUrl = null; }
   if (outUrl)    { URL.revokeObjectURL(outUrl);    outUrl = null; }
   currentBlob = null;
+  sourceH = 0;
   fileInput.value = '';
 }
 
+/* ── Wizard selection ─────────────────────────────────────────────── */
+document.querySelectorAll('.mode-card').forEach((card) => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('.mode-card').forEach((c) => c.classList.remove('selected'));
+    card.classList.add('selected');
+    activeMode = card.dataset.mode;
+    btnContinue.disabled = false;
+    advancedWarning.hidden = activeMode !== 'advanced';
+  });
+});
+
+btnContinue.addEventListener('click', () => {
+  if (!activeMode) return;
+  activeModeTag.className = 'active-mode-tag ' + (activeMode === 'advanced' ? 'advanced' : 'standard');
+  activeModeTag.textContent = activeMode === 'advanced' ? 'Advanced Patch' : 'Standard Compression';
+  showView('upload');
+});
+
+btnBackWizard.addEventListener('click', () => {
+  resetSession();
+  showView('wizard');
+});
+
+/* ── File reading (Android-safe) ──────────────────────────────────── */
 async function readFileWithRetry(file, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -115,7 +143,6 @@ async function handleFile(file) {
     return;
   }
   resetSession();
-
   readyName.textContent = file.name;
   readySize.textContent = humanSize(file.size);
   readyMeta.textContent = 'reading file…';
@@ -125,7 +152,6 @@ async function handleFile(file) {
   try {
     bytes = await readFileWithRetry(file);
   } catch (e) {
-    console.error('Failed to read file:', e);
     readyMeta.textContent = 'Could not read file: ' + ((e && e.message) || String(e));
     return;
   }
@@ -145,98 +171,94 @@ async function handleFile(file) {
     ]);
     let codecInfo = '';
     if (videoTrack) {
-      try {
-        const c = await videoTrack.getCodec();
-        if (c) codecInfo = ' · ' + c;
-      } catch {}
+      try { const c = await videoTrack.getCodec(); if (c) codecInfo = ' · ' + c; } catch {}
     }
-    const w = videoTrack ? await videoTrack.getDisplayWidth()  : 0;
-    const h = videoTrack ? await videoTrack.getDisplayHeight() : 0;
-    readyMeta.textContent = (w && h ? `${w}×${h} · ` : '') + fmtTime(duration) + codecInfo;
+    sourceH = videoTrack ? await videoTrack.getDisplayHeight() : 0;
+    const sourceW = videoTrack ? await videoTrack.getDisplayWidth() : 0;
+    readyMeta.textContent =
+      (sourceW && sourceH ? `${sourceW}×${sourceH} · ` : '') + fmtTime(duration) + codecInfo;
   } catch (e) {
-    console.error('Metadata probe failed:', e);
     readyMeta.textContent = 'metadata unavailable — ' + ((e && e.message) || String(e));
   }
 }
 
-async function startCompress() {
-  if (!currentBlob) return;
+/* ══════════════════════════════════════════════════════════════════
+   STANDARD PATH — WebCodecs GPU re-encode via mediabunny
+   ══════════════════════════════════════════════════════════════════ */
+async function runStandard() {
+  const input = new Input({
+    source: new BlobSource(currentBlob, { useStreamReader: false }),
+    formats: ALL_FORMATS,
+  });
+  const output = new Output({
+    format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
+    target: new BufferTarget(),
+  });
+
+  encStatus.textContent = 'Initializing encoder…';
+
+  const videoConfig = { codec: 'avc', bitrate: NORMAL_BITRATE };
+  if (sourceH > NORMAL_MAX_H) videoConfig.height = NORMAL_MAX_H;
+
+  const conversion = await Conversion.init({ input, output, video: videoConfig });
+
+  if (conversion.discardedTracks?.some(t =>
+      (t.type || '').toLowerCase().includes('video'))) {
+    throw new Error('Device cannot encode this video. Try Chrome, Edge, or Safari 16.4+.');
+  }
+
+  if (conversion.onProgress) {
+    conversion.onProgress = (p) => {
+      const pct = Math.max(0, Math.min(1, p));
+      pctText.textContent = (pct * 100).toFixed(1) + '%';
+      barFill.style.width = (pct * 100).toFixed(1) + '%';
+    };
+  }
+
+  encStatus.textContent = 'Encoding with GPU…';
+  await conversion.execute();
+
+  const buffer = output.target.buffer;
+  return new Blob([buffer], { type: 'video/mp4' });
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   ADVANCED PATH — MP4 container patch (no re-encode)
+   ══════════════════════════════════════════════════════════════════ */
+async function runAdvanced() {
+  encStatus.textContent = 'Analyzing MP4 container…';
+  pctText.textContent = '…';
+  barFill.style.width = '0%';
+  // Yield to let the UI update
+  await new Promise(r => setTimeout(r, 50));
+
+  const patched = await patchMP4(currentBlob, { inflationFactor: 10 });
+
+  pctText.textContent = '100%';
+  barFill.style.width = '100%';
+  encStatus.textContent = 'Container patched.';
+  return patched;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Entry point — dispatches to the active mode
+   ══════════════════════════════════════════════════════════════════ */
+async function startProcess() {
+  if (!currentBlob || !activeMode) return;
+
+  const isAdvanced = activeMode === 'advanced';
+
   setEngineBadge('loading');
   pctText.textContent = '—';
-  encStatus.textContent = 'Reading file…';
+  encStatus.textContent = isAdvanced ? 'Reading container…' : 'Reading file…';
   barFill.style.width = '0%';
+  barFill.className = isAdvanced ? 'patch' : '';
+  encEyebrow.textContent = isAdvanced ? 'Patching' : 'Encoding';
   showView('encoding');
   startedAt = performance.now();
 
   try {
-    const input = new Input({
-      source: new BlobSource(currentBlob, { useStreamReader: false }),
-      formats: ALL_FORMATS,
-    });
-    const output = new Output({
-      format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
-      target: new BufferTarget(),
-    });
-
-    encStatus.textContent = 'Initializing encoder…';
-
-    const conversion = await Conversion.init({
-      input,
-      output,
-      video: {
-        codec: 'avc',
-        bitrate: VIDEO_QUALITY,
-        resize: { width: TARGET_WIDTH, height: TARGET_HEIGHT },
-      },
-    });
-
-    console.log('=== Conversion diagnostics ===');
-    console.log('isValid:', conversion.isValid);
-    console.log('discardedTracks:', conversion.discardedTracks);
-
-    const discarded = conversion.discardedTracks || [];
-    const discardedVideo = discarded.find((t) =>
-      (t.type || t.trackType || '').toLowerCase().includes('video')
-    );
-
-    if (discardedVideo) {
-      const reason = discardedVideo.reason || discardedVideo.message || JSON.stringify(discardedVideo);
-      throw new Error('Video track discarded: ' + reason);
-    }
-
-    if (conversion.isValid === false) {
-      throw new Error(
-        'Conversion invalid. Discarded: ' +
-        discarded.map((t) => `${t.type || '?'} (${t.reason || 'unknown'})`).join('; ')
-      );
-    }
-
-    if (conversion.onProgress) {
-      conversion.onProgress = (p) => {
-        const pct = Math.max(0, Math.min(1, p));
-        pctText.textContent = (pct * 100).toFixed(1) + '%';
-        barFill.style.width = (pct * 100).toFixed(1) + '%';
-      };
-    }
-
-    encStatus.textContent = 'Encoding with GPU…';
-    await conversion.execute();
-
-    encStatus.textContent = 'Finalizing…';
-    const buffer = output.target.buffer;
-    if (!buffer) throw new Error('No output buffer produced.');
-
-    const blob = new Blob([buffer], { type: 'video/mp4' });
-
-    if (blob.size < 100_000 && currentBlob.size > 1_000_000) {
-      throw new Error(
-        'Output is only ' + humanSize(blob.size) + ' — video track likely dropped. ' +
-        'Check console for discardedTracks.'
-      );
-    }
-
-    if (outUrl) URL.revokeObjectURL(outUrl);
-    outUrl = URL.createObjectURL(blob);
+    const blob = isAdvanced ? await runAdvanced() : await runStandard();
 
     const elapsed = (performance.now() - startedAt) / 1000;
     const inB  = currentBlob.size;
@@ -244,33 +266,46 @@ async function startCompress() {
     const grew = outB >= inB;
     const pct  = inB > 0 ? Math.max(0, (1 - outB / inB) * 100) : 0;
 
-    doneElapsed.textContent = `Encoded in ${fmtTime(elapsed)}`;
+    doneTitle.textContent = isAdvanced ? 'Patch complete' : 'Compression complete';
+    doneElapsed.textContent = `${isAdvanced ? 'Patched' : 'Encoded'} in ${fmtTime(elapsed)}`;
     doneOrigSize.textContent = humanSize(inB);
     doneOutSize.textContent  = humanSize(outB);
-    doneBadge.textContent    = grew ? '· no size gain' : `· −${pct.toFixed(1)}%`;
-    doneSaveNote.textContent = grew
-      ? 'Source was already optimized — output prioritizes platform compatibility.'
-      : `Saved ${humanSize(inB - outB)} — output is ${(100 - pct).toFixed(1)}% of the original.`;
 
+    doneOutCard.className = 'card is-out' + (isAdvanced ? ' patch' : '');
+    doneBadge.textContent = isAdvanced
+      ? (grew ? `· +${humanSize(outB - inB)} metadata` : '· size unchanged')
+      : (grew ? '· no size gain' : `· −${pct.toFixed(1)}%`);
+
+    doneSaveNote.textContent = isAdvanced
+      ? 'Container metadata patched. Media data is byte-identical to the source.'
+      : (grew
+          ? 'Source was already optimized.'
+          : `Saved ${humanSize(inB - outB)} — output is ${(100 - pct).toFixed(1)}% of the original.`);
+
+    uploadTips.hidden = !isAdvanced;
+
+    if (outUrl) URL.revokeObjectURL(outUrl);
+    outUrl = URL.createObjectURL(blob);
     doneOrigVid.src = sourceUrl || '';
     doneOutVid.src  = outUrl || '';
 
     const base = (readyName.textContent || 'video').replace(/\.[^.]*$/, '');
     btnDownload.href = outUrl;
-    btnDownload.download = `${base}-compressed.mp4`;
+    btnDownload.download = isAdvanced
+      ? `${base}-patched.mp4`
+      : `${base}-compressed.mp4`;
 
-    setEngineBadge('gpu');
+    setEngineBadge(isAdvanced ? 'patch' : 'gpu');
     showView('done');
   } catch (err) {
-    console.error('Compression failed:', err);
+    console.error(err);
     setEngineBadge('idle');
-    const msg = (err && err.message) || String(err);
-    const stack = (err && err.stack) ? '\n\n' + err.stack : '';
-    errMsg.textContent = msg + stack;
+    errMsg.textContent = (err && err.message) || String(err);
     showView('error');
   }
 }
 
+/* ── Wiring ───────────────────────────────────────────────────────── */
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
@@ -288,10 +323,17 @@ dropZone.addEventListener('drop', (e) => {
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop',     (e) => e.preventDefault());
 
-btnCompress.addEventListener('click', startCompress);
+btnCompress.addEventListener('click', startProcess);
 btnChangeFile.addEventListener('click', () => { resetSession(); showView('upload'); });
-btnAgain.addEventListener('click', () => { resetSession(); showView('upload'); });
+btnAgain.addEventListener('click', () => {
+  resetSession();
+  activeMode = null;
+  document.querySelectorAll('.mode-card').forEach((c) => c.classList.remove('selected'));
+  btnContinue.disabled = true;
+  advancedWarning.hidden = true;
+  showView('wizard');
+});
 btnRetry.addEventListener('click', () => showView(currentBlob ? 'ready' : 'upload'));
 
 setEngineBadge('idle');
-showView('upload');
+showView('wizard');

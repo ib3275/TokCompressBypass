@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -18,7 +18,7 @@
     --bg: #000; --fg: #ececec; --fg-2: #a3a3a3; --fg-3: #737373; --fg-5: #3a3a3a;
     --line: #171717; --line-2: #262626;
     --accent: #10b981; --accent-2: #34d399;
-    --danger: #ef4444; --warn: #f59e0b;
+    --danger: #ef4444; --warn: #f59e0b; --purple: #a78bfa;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     color-scheme: dark;
@@ -36,18 +36,73 @@
   #engDot { width: 6px; height: 6px; border-radius: 999px; background: var(--fg-5); }
   #engDot[data-state="loading"] { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
   #engDot[data-state="gpu"] { background: var(--accent); }
-  #engDot[data-state="cpu"] { background: var(--warn); }
+  #engDot[data-state="patch"] { background: var(--purple); }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
   main { padding-bottom: 60px; }
   .eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--fg-3); }
   .eyebrow::before { content: ''; width: 5px; height: 5px; border-radius: 999px; background: var(--accent); }
 
-  .hero { padding: 44px 0 0; text-align: center; }
-  .hero h1 { font-size: 22px; font-weight: 600; color: #fff; }
-  .hero p { margin-top: 10px; font-size: 13px; line-height: 1.6; color: var(--fg-3); max-width: 420px; margin-left: auto; margin-right: auto; }
+  /* ── Wizard ──────────────────────────────────────── */
+  .wizard { padding: 44px 0 0; text-align: center; }
+  .wizard h1 { font-size: 22px; font-weight: 600; color: #fff; }
+  .wizard p { margin-top: 10px; font-size: 13px; line-height: 1.6; color: var(--fg-3); max-width: 460px; margin-left: auto; margin-right: auto; }
 
-  .dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 28px; padding: 40px 20px; border: 1px dashed var(--line-2); border-radius: 12px; cursor: pointer; text-align: center; transition: border-color .15s, background-color .15s; }
+  .mode-cards { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 32px; }
+  @media (min-width: 560px) { .mode-cards { grid-template-columns: 1fr 1fr; } }
+
+  .mode-card {
+    border: 1px solid var(--line-2);
+    border-radius: 14px;
+    padding: 20px;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .15s, background .15s, transform .15s;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .mode-card:hover { border-color: #333; background: #050505; transform: translateY(-1px); }
+  .mode-card.selected { border-color: var(--accent); background: rgba(16,185,129,.04); }
+  .mode-card.advanced.selected { border-color: var(--purple); background: rgba(167,139,250,.04); }
+
+  .mode-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 4px; align-self: flex-start;
+  }
+  .mode-card .mode-badge { background: rgba(16,185,129,.15); color: var(--accent-2); }
+  .mode-card.advanced .mode-badge { background: rgba(167,139,250,.15); color: var(--purple); }
+
+  .mode-card h2 { font-size: 15px; font-weight: 600; color: #fff; }
+  .mode-card .desc { font-size: 12px; color: var(--fg-3); line-height: 1.55; }
+  .mode-card .features-list { font-size: 11px; color: var(--fg-3); line-height: 1.7; margin-top: 2px; }
+  .mode-card .features-list .ok::before { content: '✓ '; color: var(--accent-2); }
+  .mode-card .features-list .warn::before { content: '⚠ '; color: var(--warn); }
+
+  /* ── Warning panel (advanced) ────────────────────── */
+  #advancedWarning {
+    margin-top: 16px; padding: 14px 16px;
+    border: 1px solid #4c1d95; background: rgba(76,29,149,.08);
+    border-radius: 10px;
+    font-size: 12px; line-height: 1.6; color: #c4b5fd;
+  }
+  #advancedWarning strong { color: #ddd6fe; }
+  #advancedWarning ul { margin: 8px 0 0 16px; }
+  #advancedWarning li { margin-top: 4px; }
+
+  .continue-bar { margin-top: 24px; display: flex; justify-content: center; }
+  .btn-primary, .btn-ghost {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 11px 22px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    transition: background .12s, border-color .12s, color .12s; white-space: nowrap;
+  }
+  .btn-primary { background: #fff; color: #000; }
+  .btn-primary:hover { background: #d4d4d4; }
+  .btn-primary:disabled { opacity: .35; cursor: not-allowed; }
+  .btn-ghost { border: 1px solid var(--line-2); color: var(--fg-2); }
+  .btn-ghost:hover { border-color: #333; color: #fff; }
+
+  /* ── Dropzone ────────────────────────────────────── */
+  .dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 20px; padding: 40px 20px; border: 1px dashed var(--line-2); border-radius: 12px; cursor: pointer; text-align: center; transition: border-color .15s, background-color .15s; }
   .dropzone:hover { border-color: #333; }
   .dropzone.is-drag { border-color: var(--accent); background: rgba(16,185,129,.03); }
   .dropzone svg { width: 22px; height: 22px; color: var(--fg-5); }
@@ -56,14 +111,8 @@
   .dropzone .dz-sub span { color: var(--accent-2); }
   .dropzone .dz-formats { margin-top: 18px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--fg-5); }
 
-  .features { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 14px; }
-  @media (min-width: 560px) { .features { grid-template-columns: repeat(3, 1fr); } }
-  .feature { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-  .feature h3 { font-size: 12px; font-weight: 500; }
-  .feature p { margin-top: 3px; font-size: 11px; color: var(--fg-3); }
-
+  /* ── Panel ───────────────────────────────────────── */
   .panel { border: 1px solid var(--line); border-radius: 12px; padding: 22px; margin-top: 24px; }
-
   .ready-grid { display: grid; grid-template-columns: 1fr; gap: 18px; margin-top: 16px; }
   @media (min-width: 560px) { .ready-grid { grid-template-columns: 1.1fr 1fr; } }
   .ready-grid video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; border: 1px solid var(--line); }
@@ -71,51 +120,47 @@
   #readyName { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ready-line { margin-top: 4px; font-size: 12px; color: var(--fg-3); }
   .ready-line #readySize { font-family: var(--mono); }
-  .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 14px; }
-  .tag { font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--line-2); color: var(--fg-3); }
+  .active-mode-tag { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; align-self: flex-start; }
+  .active-mode-tag.standard { background: rgba(16,185,129,.15); color: var(--accent-2); }
+  .active-mode-tag.advanced { background: rgba(167,139,250,.15); color: var(--purple); }
 
   .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
   @media (min-width: 480px) { .actions { flex-direction: row; } }
   .actions > * { flex: 1; }
 
-  .btn-primary, .btn-ghost, .btn-danger {
-    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
-    transition: background .12s, border-color .12s, color .12s; white-space: nowrap;
-  }
-  .btn-primary { background: #fff; color: #000; }
-  .btn-primary:hover { background: #d4d4d4; }
-  .btn-ghost { border: 1px solid var(--line-2); color: var(--fg-2); }
-  .btn-ghost:hover { border-color: #333; color: #fff; }
-  .btn-danger { border: 1px solid var(--line-2); color: var(--fg-3); font-size: 11px; padding: 6px 12px; }
-  .btn-danger:hover { border-color: #58181a; color: var(--danger); }
-  .btn-danger:disabled { opacity: .4; cursor: not-allowed; }
-
+  /* ── Encoding ────────────────────────────────────── */
   .enc-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: 14px; }
   #pctText { font-family: var(--mono); font-size: 32px; font-weight: 500; font-variant-numeric: tabular-nums; color: #fff; line-height: 1; }
   #encStatus { margin-top: 8px; font-size: 12px; color: var(--fg-3); }
-
   .bar { position: relative; height: 4px; border-radius: 999px; background: var(--line); overflow: hidden; margin-top: 18px; }
   #barFill { height: 100%; width: 0; border-radius: 999px; background: var(--accent); transition: width .3s ease-out; }
+  #barFill.patch { background: var(--purple); }
 
+  /* ── Done ─────────────────────────────────────────── */
   .done-head { text-align: center; padding-top: 12px; }
   .done-check { width: 34px; height: 34px; margin: 0 auto; border-radius: 999px; border: 1px solid #0d3d2c; background: #04170f; display: grid; place-items: center; color: var(--accent-2); }
   .done-check svg { width: 15px; height: 15px; }
   .done-head h2 { margin-top: 12px; font-size: 15px; font-weight: 600; color: #fff; }
   #doneElapsed { margin-top: 4px; font-size: 11px; color: var(--fg-3); }
-
   .compare { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 24px; }
   @media (min-width: 560px) { .compare { grid-template-columns: 1fr 1fr; } }
   .card { border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
   .card.is-out { border-color: #0f3a2a; background: #04140f; }
+  .card.is-out.patch { border-color: #3b1e78; background: rgba(76,29,149,.08); }
   .card-label { font-size: 10px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--fg-3); }
   .card.is-out .card-label { color: var(--accent-2); }
+  .card.is-out.patch .card-label { color: var(--purple); }
   .card-size { margin-top: 8px; font-family: var(--mono); font-size: 20px; font-weight: 500; color: var(--fg-2); }
   .card.is-out .card-size { color: #fff; }
   .card video { width: 100%; aspect-ratio: 16/9; margin-top: 14px; background: #000; border-radius: 8px; border: 1px solid var(--line); }
   #doneBadge { font-size: 11px; font-weight: 500; color: var(--accent-2); }
   #doneSaveNote { margin-top: 16px; text-align: center; font-size: 12px; color: var(--fg-3); }
+  .upload-tips { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: 10px; font-size: 12px; line-height: 1.65; color: var(--fg-3); }
+  .upload-tips strong { color: #fff; }
+  .upload-tips ul { margin: 8px 0 0 16px; }
+  .upload-tips li { margin-top: 4px; }
 
+  /* ── Error ────────────────────────────────────────── */
   .error { max-width: 420px; margin: 24px auto 0; border: 1px solid #3a1518; background: #140406; border-radius: 12px; padding: 22px; text-align: center; }
   .error h2 { font-size: 14px; font-weight: 600; color: #fff; }
   #errMsg { margin-top: 6px; font-size: 12px; color: var(--fg-2); word-break: break-word; }
@@ -151,13 +196,58 @@
 
 <main class="wrap">
 
-  <section data-view="upload" class="view-in">
-    <div class="hero">
-      <h1>Compress videos without uploading them.</h1>
-      <p>H.264 encoding via WebCodecs — running on your GPU, entirely on your device. No accounts. No queues. No file-size limits.</p>
+  <!-- ══════ VIEW: MODE SELECT (wizard) ══════ -->
+  <section data-view="wizard" class="view-in">
+    <div class="wizard">
+      <h1>How do you want to process your video?</h1>
+      <p>Two different techniques, two very different outcomes. Pick one to continue.</p>
     </div>
 
-    <div id="dropZone" role="button" tabindex="0" class="dropzone">
+    <div class="mode-cards">
+      <div class="mode-card" data-mode="standard">
+        <span class="mode-badge">Safe · Recommended</span>
+        <h2>Standard Compression</h2>
+        <div class="desc">Re-encode on your GPU to produce a clean, well-formed H.264 file. Honest, stable, works everywhere.</div>
+        <div class="features-list">
+          <div class="ok">GPU-accelerated encoding</div>
+          <div class="ok">100% stable, always works</div>
+          <div class="ok">Smaller file than source</div>
+          <div class="ok">Fully compliant with platform ToS</div>
+        </div>
+      </div>
+
+      <div class="mode-card advanced" data-mode="advanced">
+        <span class="mode-badge">Experimental · At your own risk</span>
+        <h2>Advanced Patch</h2>
+        <div class="desc">Rewrites the MP4 container metadata to trick TikTok's transcoder into skipping re-encoding. No pixels are touched.</div>
+        <div class="features-list">
+          <div class="ok">Zero quality loss — original data preserved</div>
+          <div class="ok">Preserves resolution &amp; frame rate</div>
+          <div class="warn">May violate TikTok's Terms of Service</div>
+          <div class="warn">May break if TikTok updates its pipeline</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="advancedWarning" hidden>
+      <strong>Before you continue:</strong> The Advanced Patch method modifies your MP4's internal container structure. It:
+      <ul>
+        <li>Does not re-encode any video or audio data</li>
+        <li>May cause playback glitches on desktop players</li>
+        <li>Must be uploaded from the TikTok web uploader, not the mobile app</li>
+        <li>Is not officially endorsed by TikTok and could be patched at any time</li>
+      </ul>
+      <div style="margin-top:10px">By continuing, you accept full responsibility for how you use the output.</div>
+    </div>
+
+    <div class="continue-bar">
+      <button id="btnContinue" class="btn-primary" disabled>Continue</button>
+    </div>
+  </section>
+
+  <!-- ══════ VIEW: UPLOAD ══════ -->
+  <section data-view="upload" hidden>
+    <div class="dropzone" id="dropZone" role="button" tabindex="0">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 13v8"/><path d="m8 17 4-4 4 4"/>
         <path d="M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.2"/>
@@ -168,13 +258,12 @@
       <input id="fileInput" type="file" accept="video/*,.mp4,.mov,.m4v,.webm,.mkv,.avi,.wmv,.flv,.ts,.3gp,.ogv" hidden />
     </div>
 
-    <div class="features">
-      <div class="feature"><h3>GPU-accelerated</h3><p>Hardware H.264 encoding.</p></div>
-      <div class="feature"><h3>Private by design</h3><p>Frames never leave this tab.</p></div>
-      <div class="feature"><h3>Platform-tuned</h3><p>Optimized for TikTok &amp; Reels.</p></div>
+    <div class="actions" style="margin-top:20px">
+      <button id="btnBackWizard" class="btn-ghost">← Change method</button>
     </div>
   </section>
 
+  <!-- ══════ VIEW: READY ══════ -->
   <section data-view="ready" hidden>
     <div class="panel">
       <div class="eyebrow">File loaded</div>
@@ -183,21 +272,20 @@
         <div class="ready-meta">
           <div id="readyName">—</div>
           <div class="ready-line"><span id="readySize">—</span> · <span id="readyMeta">—</span></div>
-          <div class="tags">
-            <span class="tag">H.264</span><span class="tag">AAC</span><span class="tag">MP4</span><span class="tag">+faststart</span>
-          </div>
+          <div id="activeModeTag" class="active-mode-tag standard">Standard Compression</div>
         </div>
       </div>
       <div class="actions">
-        <button id="btnCompress" class="btn-primary">Compress video</button>
+        <button id="btnCompress" class="btn-primary">Run</button>
         <button id="btnChangeFile" class="btn-ghost">Change file</button>
       </div>
     </div>
   </section>
 
+  <!-- ══════ VIEW: PROCESSING ══════ -->
   <section data-view="encoding" hidden>
     <div class="panel">
-      <div class="eyebrow">Encoding</div>
+      <div class="eyebrow" id="encEyebrow">Processing</div>
       <div class="enc-head">
         <div style="min-width:0">
           <div id="pctText">—</div>
@@ -208,12 +296,13 @@
     </div>
   </section>
 
+  <!-- ══════ VIEW: DONE ══════ -->
   <section data-view="done" hidden>
     <div class="done-head">
       <div class="done-check">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
       </div>
-      <h2>Compression complete</h2>
+      <h2 id="doneTitle">Done</h2>
       <div id="doneElapsed">—</div>
     </div>
 
@@ -223,20 +312,30 @@
         <div id="doneOrigSize" class="card-size">—</div>
         <video id="doneOrigVid" controls muted playsinline preload="metadata"></video>
       </div>
-      <div class="card is-out">
-        <div class="card-label">Compressed <span id="doneBadge"></span></div>
+      <div id="doneOutCard" class="card is-out">
+        <div class="card-label">Output <span id="doneBadge"></span></div>
         <div id="doneOutSize" class="card-size">—</div>
         <video id="doneOutVid" controls playsinline preload="metadata"></video>
       </div>
     </div>
 
     <div id="doneSaveNote">—</div>
+    <div id="uploadTips" class="upload-tips" hidden>
+      <strong>Before you upload to TikTok:</strong>
+      <ul>
+        <li>Use the <strong>TikTok web uploader</strong> (tiktok.com), not the mobile app</li>
+        <li>Enable <strong>"Upload HD"</strong> in the final post screen</li>
+        <li>Set visibility to <strong>"Everyone"</strong> — not "Only me"</li>
+        <li><strong>Do not edit</strong> the video inside TikTok (trim, add sounds, filters) or it will be re-encoded</li>
+      </ul>
+    </div>
     <div class="actions">
-      <a id="btnDownload" href="#" download class="btn-primary">Download compressed video</a>
-      <button id="btnAgain" class="btn-ghost">Compress another</button>
+      <a id="btnDownload" href="#" download class="btn-primary">Download</a>
+      <button id="btnAgain" class="btn-ghost">Start over</button>
     </div>
   </section>
 
+  <!-- ══════ VIEW: ERROR ══════ -->
   <section data-view="error" hidden>
     <div class="error">
       <h2>Something went wrong</h2>
@@ -248,7 +347,7 @@
 </main>
 
 <footer>
-  Powered by <span style="color:var(--fg-3)">Mediabunny</span> · WebCodecs · Videos never leave this tab
+  Powered by <span style="color:var(--fg-3)">WebCodecs</span> · <span style="color:var(--fg-3)">Mediabunny</span> · Videos never leave this tab
 </footer>
 
 <div id="toast"></div>
