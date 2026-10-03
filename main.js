@@ -33,10 +33,6 @@ const btnAgain       = $('btnAgain');
 const btnRetry       = $('btnRetry');
 const errMsg         = $('errMsg');
 
-/* TikTok-tuned profile: CRF 22, 1080p, hardware-accelerated.
-   Audio is NOT re-encoded — Android Chrome can't encode AAC via
-   WebCodecs, and TikTok re-encodes audio anyway. We copy the source
-   audio stream straight through. */
 const VIDEO_QUALITY = new Quality({ quantizer: 22, bitrate: 12_000_000 });
 const TARGET_WIDTH  = 1920;
 const TARGET_HEIGHT = 1080;
@@ -104,9 +100,17 @@ async function handleFile(file) {
       input.computeDuration(),
       input.getPrimaryVideoTrack(),
     ]);
+    let codecInfo = '';
+    if (videoTrack) {
+      // Try to expose the source codec (h264, hevc, vp9, ...)
+      try {
+        const c = await videoTrack.getCodec();
+        if (c) codecInfo = ' · ' + c;
+      } catch {}
+    }
     const w = videoTrack ? await videoTrack.getDisplayWidth()  : 0;
     const h = videoTrack ? await videoTrack.getDisplayHeight() : 0;
-    readyMeta.textContent = (w && h ? `${w}×${h} · ` : '') + fmtTime(duration);
+    readyMeta.textContent = (w && h ? `${w}×${h} · ` : '') + fmtTime(duration) + codecInfo;
   } catch (e) {
     readyMeta.textContent = 'metadata unavailable';
     console.warn(e);
@@ -135,9 +139,6 @@ async function startCompress() {
 
     encStatus.textContent = 'Initializing encoder…';
 
-    /* Audio is intentionally omitted — mediabunny will copy the
-       original audio stream without re-encoding, which works on
-       every platform (no AAC encoder needed). */
     const conversion = await Conversion.init({
       input,
       output,
@@ -149,15 +150,33 @@ async function startCompress() {
       },
     });
 
-    // Diagnose what got discarded, if anything.
-    if (conversion.discardedTracks && conversion.discardedTracks.length) {
-      console.warn('Discarded tracks:', conversion.discardedTracks);
+    // ── Detailed diagnostics ─────────────────────────────────────
+    console.log('=== Conversion diagnostics ===');
+    console.log('isValid:', conversion.isValid);
+    console.log('discardedTracks:', conversion.discardedTracks);
+
+    // Explicitly detect discarded tracks and surface the reason.
+    const discarded = conversion.discardedTracks || [];
+    const discardedVideo = discarded.find((t) =>
+      (t.type || t.trackType || '').toLowerCase().includes('video')
+    );
+    const discardedAudio = discarded.find((t) =>
+      (t.type || t.trackType || '').toLowerCase().includes('audio')
+    );
+
+    if (discardedVideo) {
+      const reason = discardedVideo.reason || discardedVideo.message || JSON.stringify(discardedVideo);
+      throw new Error(
+        'Your device cannot encode the video track. Reason: ' + reason +
+        '. The source codec may be unsupported (HEVC/H.265 is common on Android).'
+      );
     }
+
     if (conversion.isValid === false) {
-      const reason = (conversion.discardedTracks || [])
-        .map((t) => `${t.type || '?'}: ${t.reason || 'unknown'}`)
-        .join('; ') || 'device cannot encode this configuration';
-      throw new Error(`This device can't process this video (${reason}). Try a lower-resolution source, or use desktop Chrome.`);
+      throw new Error(
+        'Conversion invalid. Discarded: ' +
+        discarded.map((t) => `${t.type || '?'} (${t.reason || 'unknown'})`).join('; ')
+      );
     }
 
     if (conversion.onProgress) {
@@ -176,6 +195,16 @@ async function startCompress() {
     if (!buffer) throw new Error('No output buffer produced.');
 
     const blob = new Blob([buffer], { type: 'video/mp4' });
+
+    // Sanity check: if output is < 5% of a >1s video, something got dropped.
+    const suspiciouslySmall = blob.size < 100_000 && currentFile.size > 1_000_000;
+    if (suspiciouslySmall) {
+      throw new Error(
+        'Output is only ' + humanSize(blob.size) + ' — the video track was likely dropped. ' +
+        'Check the browser console for the discardedTracks diagnostic.'
+      );
+    }
+
     if (outUrl) URL.revokeObjectURL(outUrl);
     outUrl = URL.createObjectURL(blob);
 
