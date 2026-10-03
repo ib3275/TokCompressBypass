@@ -12,6 +12,15 @@
    Presets (Normal mode)
    ══════════════════════════════════════════════════════════════════ */
 const PRESETS = {
+  maxquality: {
+    name: 'Max Quality',
+    specs: '1080p · 30 Mbps',
+    desc: 'Highest quality that still plays smoothly. Bigger files, best fidelity for high-detail footage.',
+    best: 'Gaming clips, anime edits, fast motion, archiving',
+    height: 1080,
+    bitrate: 30_000_000,
+    tiktokTips: true,
+  },
   tiktok: {
     name: 'TikTok Ready',
     specs: '1080p · 12 Mbps',
@@ -19,14 +28,7 @@ const PRESETS = {
     best: 'TikTok, Reels, YouTube Shorts',
     height: 1080,
     bitrate: 12_000_000,
-  },
-  archive: {
-    name: 'High Quality',
-    specs: '1080p · 20 Mbps',
-    desc: 'Maximum quality that still plays smoothly on modern devices. Larger files.',
-    best: 'Archiving, editing, high-motion footage',
-    height: 1080,
-    bitrate: 20_000_000,
+    tiktokTips: true,
   },
   messaging: {
     name: 'Messaging',
@@ -35,6 +37,7 @@ const PRESETS = {
     best: 'Sharing on chat apps, quick uploads',
     height: 720,
     bitrate: 4_000_000,
+    tiktokTips: false,
   },
   smallest: {
     name: 'Smallest File',
@@ -43,23 +46,18 @@ const PRESETS = {
     best: 'Slow connections, low-storage devices',
     height: 480,
     bitrate: 1_500_000,
+    tiktokTips: false,
   },
 };
 
-/* ══════════════════════════════════════════════════════════════════
-   State
-   ══════════════════════════════════════════════════════════════════ */
 let currentBlob = null;
 let sourceUrl   = null;
 let outUrl      = null;
 let startedAt   = 0;
 let sourceH     = 0;
-let activeMode  = null;         // 'normal' | 'advanced'
-let activeConfig = null;        // { height, bitrate, label, sublabel, isPreset }
+let activeMode  = null;
+let activeConfig = null;
 
-/* ══════════════════════════════════════════════════════════════════
-   DOM refs
-   ══════════════════════════════════════════════════════════════════ */
 const $ = (id) => document.getElementById(id);
 const dropZone      = $('dropZone');
 const fileInput     = $('fileInput');
@@ -90,9 +88,6 @@ const btnContinue   = $('btnContinue');
 const presetList    = $('presetList');
 const advBitrate    = $('advBitrate');
 
-/* ══════════════════════════════════════════════════════════════════
-   Helpers
-   ══════════════════════════════════════════════════════════════════ */
 const humanSize = (b) => {
   const u = ['B','KB','MB','GB','TB']; let i = 0, n = Number(b) || 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
@@ -134,9 +129,7 @@ function resetSession() {
   fileInput.value = '';
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   STEP 1: Mode picker
-   ══════════════════════════════════════════════════════════════════ */
+/* Mode picker */
 document.querySelectorAll('.mode-card').forEach((card) => {
   card.addEventListener('click', () => {
     document.querySelectorAll('.mode-card').forEach((c) => c.classList.remove('selected'));
@@ -148,17 +141,11 @@ document.querySelectorAll('.mode-card').forEach((card) => {
 
 btnContinue.addEventListener('click', () => {
   if (!activeMode) return;
-  if (activeMode === 'normal') {
-    renderPresets();
-    showView('presets');
-  } else {
-    showView('advanced');
-  }
+  if (activeMode === 'normal') { renderPresets(); showView('presets'); }
+  else { showView('advanced'); }
 });
 
-/* ══════════════════════════════════════════════════════════════════
-   STEP 2a: Preset list
-   ══════════════════════════════════════════════════════════════════ */
+/* Preset list */
 function renderPresets() {
   presetList.innerHTML = '';
   for (const [key, p] of Object.entries(PRESETS)) {
@@ -177,7 +164,7 @@ function renderPresets() {
         bitrate: p.bitrate,
         label: 'Preset',
         sublabel: p.name,
-        isPreset: true,
+        tiktokTips: p.tiktokTips,
       };
       updateConfigSummary();
       showView('upload');
@@ -186,9 +173,7 @@ function renderPresets() {
   }
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   STEP 2b: Advanced panel
-   ══════════════════════════════════════════════════════════════════ */
+/* Advanced panel */
 advBitrate.addEventListener('input', (e) => {
   $('advBitrateValue').textContent = e.target.value + ' Mbps';
 });
@@ -196,44 +181,34 @@ advBitrate.addEventListener('input', (e) => {
 $('btnAdvancedApply').addEventListener('click', () => {
   const resVal = $('advResolution').value;
   const mbps   = parseInt(advBitrate.value, 10);
-
   let height = 0;
   if (resVal !== 'source') height = parseInt(resVal, 10);
 
   activeConfig = {
-    height: height || null,       // null = keep source resolution
+    height: height || null,
     bitrate: mbps * 1_000_000,
     label: 'Custom',
     sublabel: (height ? height + 'p' : 'Source') + ' · ' + mbps + ' Mbps',
-    isPreset: false,
+    tiktokTips: false,
   };
   updateConfigSummary();
   showView('upload');
 });
 
-/* ══════════════════════════════════════════════════════════════════
-   Back navigation
-   ══════════════════════════════════════════════════════════════════ */
 $('btnPresetBack').addEventListener('click', () => showView('wizard'));
 $('btnAdvancedBack').addEventListener('click', () => showView('wizard'));
-
 $('btnBackSettings').addEventListener('click', () => {
   resetSession();
   if (activeMode === 'normal') showView('presets');
   else showView('advanced');
 });
 
-/* ══════════════════════════════════════════════════════════════════
-   Config summary on dropzone
-   ══════════════════════════════════════════════════════════════════ */
 function updateConfigSummary() {
   if (!activeConfig) { activeSummary.textContent = '—'; return; }
-  activeSummary.textContent = `${activeConfig.sublabel}`;
+  activeSummary.textContent = activeConfig.sublabel;
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   File reading (Android-safe)
-   ══════════════════════════════════════════════════════════════════ */
+/* Android-safe file read */
 async function readFileWithRetry(file, maxRetries = 4) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -258,7 +233,6 @@ async function handleFile(file) {
     return;
   }
 
-  /* Start reading IMMEDIATELY — Android content:// permission expires fast. */
   const readPromise = readFileWithRetry(file);
 
   resetSession();
@@ -305,9 +279,6 @@ async function handleFile(file) {
   readyModeTag.innerHTML = `${activeConfig.label} · <span class="sub">${activeConfig.sublabel}</span>`;
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   Encode
-   ══════════════════════════════════════════════════════════════════ */
 async function startCompress() {
   if (!currentBlob || !activeConfig) return;
 
@@ -330,8 +301,6 @@ async function startCompress() {
 
     encStatus.textContent = 'Initializing encoder…';
 
-    /* Build video config. height is direct on video config (not nested).
-       Bitrate is a plain number. Only downscale if the source is larger. */
     const videoConfig = { codec: 'avc', bitrate: activeConfig.bitrate };
     if (activeConfig.height && sourceH > activeConfig.height) {
       videoConfig.height = activeConfig.height;
@@ -387,8 +356,7 @@ async function startCompress() {
       ? 'Source was already optimized — output prioritizes compatibility.'
       : `Saved ${humanSize(inB - outB)} — output is ${(100 - pct).toFixed(1)}% of the original.`;
 
-    /* Show TikTok tips when the source had TikTok in mind */
-    uploadTips.hidden = !(activeConfig.isPreset && activeConfig.sublabel === 'TikTok Ready');
+    uploadTips.hidden = !activeConfig.tiktokTips;
 
     doneOrigVid.src = sourceUrl || '';
     doneOutVid.src  = outUrl || '';
@@ -407,11 +375,7 @@ async function startCompress() {
   }
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   Wiring
-   ══════════════════════════════════════════════════════════════════ */
 fileInput.addEventListener('change', (e) => handleFile(e.target.files?.[0]));
-
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
