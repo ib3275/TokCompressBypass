@@ -435,7 +435,7 @@ async function toBlobURL(url, mimeType) {
       );
 
       const cfg = {
-        coreURL: await toBlobURL(LOCAL_CORE, 'text/javascript'),
+        coreURL: new URL(LOCAL_CORE, location.href).href,
         wasmURL: URL.createObjectURL(wasmBlob),
       };
       if (IS_ISOLATED) {
