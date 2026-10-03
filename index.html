@@ -317,14 +317,31 @@
 <div id="toast"></div>
 
 <script src="./ffmpeg/ffmpeg.js"></script>
-<script src="./ffmpeg/util.js"></script>
 
 <script>
 (function () {
   'use strict';
 
-  const { FFmpeg }               = FFmpegWASM;
-  const { fetchFile, toBlobURL } = FFmpegUtil;
+const { FFmpeg } = FFmpegWASM;
+
+/* Inline replacements for @ffmpeg/util — avoids an extra CDN dependency. */
+async function fetchFile(file) {
+  if (typeof file === 'string') {
+    const res = await fetch(file);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+  if (file instanceof Blob) {
+    return new Uint8Array(await file.arrayBuffer());
+  }
+  if (file instanceof ArrayBuffer) return new Uint8Array(file);
+  if (file instanceof Uint8Array)  return file;
+  throw new Error('Unsupported input to fetchFile');
+}
+async function toBlobURL(url, mimeType) {
+  const res = await fetch(url);
+  const buf = await res.arrayBuffer();
+  return URL.createObjectURL(new Blob([buf], { type: mimeType }));
+}
 
   const LOCAL_CORE        = './ffmpeg-core/ffmpeg-core.js';
   const LOCAL_WASM_GZ     = './ffmpeg-core/ffmpeg-core.wasm.gz';
