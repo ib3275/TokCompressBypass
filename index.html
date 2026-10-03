@@ -439,7 +439,7 @@ async function toBlobURL(url, mimeType) {
         wasmURL: URL.createObjectURL(wasmBlob),
       };
       if (IS_ISOLATED) {
-        cfg.workerURL = await toBlobURL(LOCAL_CORE_WORKER, 'text/javascript');
+        cfg.workerURL = new URL(LOCAL_CORE_WORKER, location.href).href;
       }
 
       await inst.load(cfg);
