@@ -46,7 +46,7 @@ const VIDEO_QUALITY = new Quality({ quantizer: 22, bitrate: 12_000_000 });
 const TARGET_WIDTH  = 1920;
 const TARGET_HEIGHT = 1080;
 
-let currentBlob = null;   // in-memory snapshot; NOT the original File
+let currentBlob = null;
 let sourceUrl   = null;
 let outUrl      = null;
 let startedAt   = 0;
@@ -91,6 +91,23 @@ function resetSession() {
   fileInput.value = '';
 }
 
+async function readFileWithRetry(file, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(file);
+      });
+    } catch (e) {
+      console.warn(`FileReader attempt ${attempt} failed:`, e);
+      if (attempt === maxRetries) throw e;
+      await new Promise(r => setTimeout(r, 500 * attempt));
+    }
+  }
+}
+
 async function handleFile(file) {
   if (!file) return;
   if (!file.type.startsWith('video/') && !/\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(file.name)) {
@@ -104,13 +121,9 @@ async function handleFile(file) {
   readyMeta.textContent = 'reading file…';
   showView('ready');
 
-  /* CRITICAL FIX: read the file's bytes into memory IMMEDIATELY.
-     On Android Chrome, the File object is backed by a temporary
-     content:// URI whose permission expires shortly after selection.
-     Copying the bytes now means we own them for the rest of the session. */
   let bytes;
   try {
-    bytes = await file.arrayBuffer();
+    bytes = await readFileWithRetry(file);
   } catch (e) {
     console.error('Failed to read file:', e);
     readyMeta.textContent = 'Could not read file: ' + ((e && e.message) || String(e));
@@ -278,7 +291,7 @@ window.addEventListener('drop',     (e) => e.preventDefault());
 btnCompress.addEventListener('click', startCompress);
 btnChangeFile.addEventListener('click', () => { resetSession(); showView('upload'); });
 btnAgain.addEventListener('click', () => { resetSession(); showView('upload'); });
-btnRetry.addEventListener('click', () => showView(currentFile ? 'ready' : 'upload'));
+btnRetry.addEventListener('click', () => showView(currentBlob ? 'ready' : 'upload'));
 
 setEngineBadge('idle');
 showView('upload');
