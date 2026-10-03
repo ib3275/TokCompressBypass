@@ -33,11 +33,11 @@ const btnAgain       = $('btnAgain');
 const btnRetry       = $('btnRetry');
 const errMsg         = $('errMsg');
 
-/* TikTok-tuned profile.
-   Quantizer 22 ≈ FFmpeg CRF 22: visually clean, standard for social media.
-   12 Mbps fallback caps peaks so output stays under TikTok's 150 MB limit. */
+/* TikTok-tuned profile: CRF 22, 1080p, hardware-accelerated.
+   Audio is NOT re-encoded — Android Chrome can't encode AAC via
+   WebCodecs, and TikTok re-encodes audio anyway. We copy the source
+   audio stream straight through. */
 const VIDEO_QUALITY = new Quality({ quantizer: 22, bitrate: 12_000_000 });
-const AUDIO_BITRATE = 256_000;
 const TARGET_WIDTH  = 1920;
 const TARGET_HEIGHT = 1080;
 
@@ -135,6 +135,9 @@ async function startCompress() {
 
     encStatus.textContent = 'Initializing encoder…';
 
+    /* Audio is intentionally omitted — mediabunny will copy the
+       original audio stream without re-encoding, which works on
+       every platform (no AAC encoder needed). */
     const conversion = await Conversion.init({
       input,
       output,
@@ -143,14 +146,19 @@ async function startCompress() {
         bitrate: VIDEO_QUALITY,
         hardwareAcceleration: 'prefer-hardware',
         resize: { width: TARGET_WIDTH, height: TARGET_HEIGHT },
-        forceTranscode: true,
-      },
-      audio: {
-        codec: 'aac',
-        bitrate: AUDIO_BITRATE,
-        forceTranscode: true,
       },
     });
+
+    // Diagnose what got discarded, if anything.
+    if (conversion.discardedTracks && conversion.discardedTracks.length) {
+      console.warn('Discarded tracks:', conversion.discardedTracks);
+    }
+    if (conversion.isValid === false) {
+      const reason = (conversion.discardedTracks || [])
+        .map((t) => `${t.type || '?'}: ${t.reason || 'unknown'}`)
+        .join('; ') || 'device cannot encode this configuration';
+      throw new Error(`This device can't process this video (${reason}). Try a lower-resolution source, or use desktop Chrome.`);
+    }
 
     if (conversion.onProgress) {
       conversion.onProgress = (p) => {
