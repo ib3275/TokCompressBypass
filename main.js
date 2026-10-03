@@ -49,7 +49,7 @@ let sourceUrl   = null;
 let outUrl      = null;
 let startedAt   = 0;
 let sourceH     = 0;
-let sourceContainer = 'unknown';   // 'mp4-family' | 'webm' | 'unknown'
+let sourceContainer = 'unknown';
 let activeMode  = null;
 
 const humanSize = (b) => {
@@ -94,25 +94,6 @@ function resetSession() {
   fileInput.value = '';
 }
 
-/* ── Sniff the container type from the first 12 bytes ──────────── */
-async function sniffContainer(blob) {
-  const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
-  if (head.length < 12) return 'unknown';
-
-  // WebM/Matroska magic: 0x1A 0x45 0xDF 0xA3
-  if (head[0] === 0x1A && head[1] === 0x45 && head[2] === 0xDF && head[3] === 0xA3) {
-    return 'webm';
-  }
-
-  // QuickTime family: bytes 4..8 are one of these box types
-  const type = String.fromCharCode(head[4], head[5], head[6], head[7]);
-  const qtTypes = ['ftyp', 'moov', 'mdat', 'free', 'wide', 'skip', 'pnot', 'styp'];
-  if (qtTypes.includes(type)) return 'mp4-family';
-
-  return 'unknown';
-}
-
-/* ── Wizard selection ──────────────────────────────────────────── */
 document.querySelectorAll('.mode-card').forEach((card) => {
   card.addEventListener('click', () => {
     document.querySelectorAll('.mode-card').forEach((c) => c.classList.remove('selected'));
@@ -135,22 +116,35 @@ btnBackWizard.addEventListener('click', () => {
   showView('wizard');
 });
 
-/* ── File reading (Android-safe) ───────────────────────────────── */
-async function readFileWithRetry(file, maxRetries = 3) {
+/* ── Android-safe file read with retries ──────────────────────── */
+async function readFileWithRetry(file, maxRetries = 4) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(reader.error);
+        reader.onerror = () => reject(reader.error || new Error('FileReader error'));
         reader.readAsArrayBuffer(file);
       });
     } catch (e) {
       console.warn(`FileReader attempt ${attempt} failed:`, e);
       if (attempt === maxRetries) throw e;
-      await new Promise(r => setTimeout(r, 500 * attempt));
+      // Exponential-ish backoff, but short (Android content:// expires fast)
+      await new Promise(r => setTimeout(r, 100 * attempt));
     }
   }
+}
+
+async function sniffContainer(blob) {
+  const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+  if (head.length < 12) return 'unknown';
+  if (head[0] === 0x1A && head[1] === 0x45 && head[2] === 0xDF && head[3] === 0xA3) {
+    return 'webm';
+  }
+  const type = String.fromCharCode(head[4], head[5], head[6], head[7]);
+  const qtTypes = ['ftyp', 'moov', 'mdat', 'free', 'wide', 'skip', 'pnot', 'styp'];
+  if (qtTypes.includes(type)) return 'mp4-family';
+  return 'unknown';
 }
 
 async function handleFile(file) {
@@ -159,6 +153,16 @@ async function handleFile(file) {
     toast('That does not look like a video.');
     return;
   }
+
+  /* ═══════════════════════════════════════════════════════════════
+     CRITICAL: Kick off the file read FIRST, synchronously, in the
+     same task as the change event. Android Chrome's content://
+     permission expires within ~100ms of picking a file; if we do
+     ANY UI work first, the read will fail with a permission error.
+     ═══════════════════════════════════════════════════════════════ */
+  const readPromise = readFileWithRetry(file);
+
+  /* Now safe to do UI work — the read is already in-flight */
   resetSession();
   readyName.textContent = file.name;
   readySize.textContent = humanSize(file.size);
@@ -167,9 +171,11 @@ async function handleFile(file) {
 
   let bytes;
   try {
-    bytes = await readFileWithRetry(file);
+    bytes = await readPromise;
   } catch (e) {
-    readyMeta.textContent = 'Could not read file: ' + ((e && e.message) || String(e));
+    console.error('File read failed:', e);
+    readyMeta.textContent = 'Could not read file: ' + ((e && e.message) || String(e)) +
+      '\n\nTip: make sure the video is downloaded to the phone (not stored in Google Photos cloud), then try again.';
     return;
   }
 
@@ -205,9 +211,6 @@ async function handleFile(file) {
   }
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   STANDARD PATH
-   ══════════════════════════════════════════════════════════════════ */
 async function runStandard() {
   const input = new Input({
     source: new BlobSource(currentBlob, { useStreamReader: false }),
@@ -244,11 +247,7 @@ async function runStandard() {
   return new Blob([output.target.buffer], { type: 'video/mp4' });
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   ADVANCED PATH
-   ══════════════════════════════════════════════════════════════════ */
 async function runAdvanced() {
-  // Container compatibility gate
   if (sourceContainer !== 'mp4-family') {
     const label = sourceContainer === 'webm' ? 'WebM' : 'this container type';
     throw new Error(
@@ -272,9 +271,6 @@ async function runAdvanced() {
   return patched;
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   Dispatcher
-   ══════════════════════════════════════════════════════════════════ */
 async function startProcess() {
   if (!currentBlob || !activeMode) return;
 
@@ -337,12 +333,13 @@ async function startProcess() {
   }
 }
 
-/* ── Wiring ────────────────────────────────────────────────────── */
+/* ── Wiring — read starts synchronously in the handler ───────── */
+fileInput.addEventListener('change', (e) => handleFile(e.target.files?.[0]));
+
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
 });
-fileInput.addEventListener('change', (e) => handleFile(e.target.files?.[0]));
 
 let dragDepth = 0;
 dropZone.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; dropZone.classList.add('is-drag'); });
