@@ -49,7 +49,8 @@ let sourceUrl   = null;
 let outUrl      = null;
 let startedAt   = 0;
 let sourceH     = 0;
-let activeMode  = null;   // 'standard' | 'advanced'
+let sourceContainer = 'unknown';   // 'mp4-family' | 'webm' | 'unknown'
+let activeMode  = null;
 
 const humanSize = (b) => {
   const u = ['B','KB','MB','GB','TB']; let i = 0, n = Number(b) || 0;
@@ -79,10 +80,7 @@ function showView(name) {
 }
 
 function setEngineBadge(mode) {
-  const labels = {
-    idle: 'Ready', loading: 'Working…',
-    gpu: 'GPU encoder', patch: 'MP4 patcher',
-  };
+  const labels = { idle: 'Ready', loading: 'Working…', gpu: 'GPU encoder', patch: 'MP4 patcher' };
   $('engDot').dataset.state = mode;
   $('engText').textContent  = labels[mode] || 'Ready';
 }
@@ -92,10 +90,29 @@ function resetSession() {
   if (outUrl)    { URL.revokeObjectURL(outUrl);    outUrl = null; }
   currentBlob = null;
   sourceH = 0;
+  sourceContainer = 'unknown';
   fileInput.value = '';
 }
 
-/* ── Wizard selection ─────────────────────────────────────────────── */
+/* ── Sniff the container type from the first 12 bytes ──────────── */
+async function sniffContainer(blob) {
+  const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+  if (head.length < 12) return 'unknown';
+
+  // WebM/Matroska magic: 0x1A 0x45 0xDF 0xA3
+  if (head[0] === 0x1A && head[1] === 0x45 && head[2] === 0xDF && head[3] === 0xA3) {
+    return 'webm';
+  }
+
+  // QuickTime family: bytes 4..8 are one of these box types
+  const type = String.fromCharCode(head[4], head[5], head[6], head[7]);
+  const qtTypes = ['ftyp', 'moov', 'mdat', 'free', 'wide', 'skip', 'pnot', 'styp'];
+  if (qtTypes.includes(type)) return 'mp4-family';
+
+  return 'unknown';
+}
+
+/* ── Wizard selection ──────────────────────────────────────────── */
 document.querySelectorAll('.mode-card').forEach((card) => {
   card.addEventListener('click', () => {
     document.querySelectorAll('.mode-card').forEach((c) => c.classList.remove('selected'));
@@ -118,7 +135,7 @@ btnBackWizard.addEventListener('click', () => {
   showView('wizard');
 });
 
-/* ── File reading (Android-safe) ──────────────────────────────────── */
+/* ── File reading (Android-safe) ───────────────────────────────── */
 async function readFileWithRetry(file, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -160,6 +177,8 @@ async function handleFile(file) {
   sourceUrl = URL.createObjectURL(currentBlob);
   readyPreview.src = sourceUrl;
 
+  sourceContainer = await sniffContainer(currentBlob);
+
   try {
     const input = new Input({
       source: new BlobSource(currentBlob, { useStreamReader: false }),
@@ -175,15 +194,19 @@ async function handleFile(file) {
     }
     sourceH = videoTrack ? await videoTrack.getDisplayHeight() : 0;
     const sourceW = videoTrack ? await videoTrack.getDisplayWidth() : 0;
+    const containerInfo = sourceContainer === 'mp4-family' ? 'MP4/MOV'
+                        : sourceContainer === 'webm' ? 'WebM'
+                        : 'unknown';
     readyMeta.textContent =
-      (sourceW && sourceH ? `${sourceW}×${sourceH} · ` : '') + fmtTime(duration) + codecInfo;
+      (sourceW && sourceH ? `${sourceW}×${sourceH} · ` : '') + fmtTime(duration) + codecInfo +
+      ' · ' + containerInfo;
   } catch (e) {
     readyMeta.textContent = 'metadata unavailable — ' + ((e && e.message) || String(e));
   }
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   STANDARD PATH — WebCodecs GPU re-encode via mediabunny
+   STANDARD PATH
    ══════════════════════════════════════════════════════════════════ */
 async function runStandard() {
   const input = new Input({
@@ -218,18 +241,27 @@ async function runStandard() {
   encStatus.textContent = 'Encoding with GPU…';
   await conversion.execute();
 
-  const buffer = output.target.buffer;
-  return new Blob([buffer], { type: 'video/mp4' });
+  return new Blob([output.target.buffer], { type: 'video/mp4' });
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   ADVANCED PATH — MP4 container patch (no re-encode)
+   ADVANCED PATH
    ══════════════════════════════════════════════════════════════════ */
 async function runAdvanced() {
+  // Container compatibility gate
+  if (sourceContainer !== 'mp4-family') {
+    const label = sourceContainer === 'webm' ? 'WebM' : 'this container type';
+    throw new Error(
+      `Advanced Patch only works on MP4 or MOV files. Your file appears to be ${label}.\n\n` +
+      `Options:\n` +
+      `1. Run this file through Standard mode first — it will produce an MP4 you can then patch.\n` +
+      `2. Or download the source video as MP4 (H.264) rather than WebM (VP9).`
+    );
+  }
+
   encStatus.textContent = 'Analyzing MP4 container…';
   pctText.textContent = '…';
   barFill.style.width = '0%';
-  // Yield to let the UI update
   await new Promise(r => setTimeout(r, 50));
 
   const patched = await patchMP4(currentBlob, { inflationFactor: 10 });
@@ -241,7 +273,7 @@ async function runAdvanced() {
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   Entry point — dispatches to the active mode
+   Dispatcher
    ══════════════════════════════════════════════════════════════════ */
 async function startProcess() {
   if (!currentBlob || !activeMode) return;
@@ -305,7 +337,7 @@ async function startProcess() {
   }
 }
 
-/* ── Wiring ───────────────────────────────────────────────────────── */
+/* ── Wiring ────────────────────────────────────────────────────── */
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
