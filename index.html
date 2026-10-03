@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ClipPress — In-Browser Video Compression for TikTok &amp; Shorts</title>
+<meta name="description" content="Compress videos 100% locally in your browser with FFmpeg.wasm. No uploads, no size limits, optimized for TikTok, Reels and YouTube Shorts." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%AC%3C/text%3E%3C/svg%3E" />
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  * { margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  a { color: inherit; text-decoration: none; }
+  video { display: block; }
+  svg { display: block; max-width: 100%; }
+
+  :root {
+    --bg: #000; --fg: #ececec; --fg-2: #a3a3a3; --fg-3: #737373; --fg-4: #525252; --fg-5: #3a3a3a;
+    --line: #171717; --line-2: #262626;
+    --accent: #10b981; --accent-2: #34d399;
+    --danger: #ef4444; --warn: #f59e0b;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; min-height: 100vh; }
+  ::selection { background: rgba(16,185,129,.25); }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 0 20px; }
+
+  header { border-bottom: 1px solid var(--line); padding: 14px 0; }
+  header .wrap { display: flex; align-items: center; justify-content: space-between; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark { width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--line-2); display: grid; place-items: center; color: var(--accent-2); }
+  .brand-mark svg { width: 15px; height: 15px; }
+  .brand-name { font-size: 14px; font-weight: 600; }
+  .engine { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--fg-3); font-family: var(--mono); }
+  #engDot { width: 6px; height: 6px; border-radius: 999px; background: var(--fg-5); }
+  #engDot[data-state="loading"] { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+  #engDot[data-state="mt"] { background: var(--accent); }
+  #engDot[data-state="st"] { background: var(--warn); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  #coiWarn { margin: 14px auto 0; padding: 10px 12px; border: 1px solid #3f2a00; background: #1a1200; border-radius: 8px; font-size: 12px; color: #fbbf24; }
+
+  main { padding-bottom: 60px; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--fg-3); }
+  .eyebrow::before { content: ''; width: 5px; height: 5px; border-radius: 999px; background: var(--accent); }
+
+  .hero { padding: 44px 0 0; text-align: center; }
+  .hero h1 { font-size: 22px; font-weight: 600; color: #fff; }
+  .hero p { margin-top: 10px; font-size: 13px; line-height: 1.6; color: var(--fg-3); max-width: 420px; margin-left: auto; margin-right: auto; }
+
+  .dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 28px; padding: 40px 20px; border: 1px dashed var(--line-2); border-radius: 12px; cursor: pointer; text-align: center; transition: border-color .15s, background-color .15s; }
+  .dropzone:hover { border-color: #333; }
+  .dropzone.is-drag { border-color: var(--accent); background: rgba(16,185,129,.03); }
+  .dropzone svg { width: 22px; height: 22px; color: var(--fg-4); }
+  .dropzone .dz-title { margin-top: 14px; font-size: 13px; font-weight: 500; }
+  .dropzone .dz-sub { margin-top: 4px; font-size: 12px; color: var(--fg-3); }
+  .dropzone .dz-sub span { color: var(--accent-2); }
+  .dropzone .dz-formats { margin-top: 18px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--fg-5); }
+
+  .features { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 14px; }
+  @media (min-width: 560px) { .features { grid-template-columns: repeat(3, 1fr); } }
+  .feature { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .feature h3 { font-size: 12px; font-weight: 500; }
+  .feature p { margin-top: 3px; font-size: 11px; color: var(--fg-3); }
+
+  .panel { border: 1px solid var(--line); border-radius: 12px; padding: 22px; margin-top: 24px; }
+
+  .ready-grid { display: grid; grid-template-columns: 1fr; gap: 18px; margin-top: 16px; }
+  @media (min-width: 560px) { .ready-grid { grid-template-columns: 1.1fr 1fr; } }
+  .ready-grid video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; border: 1px solid var(--line); }
+  .ready-meta { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+  #readyName { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ready-line { margin-top: 4px; font-size: 12px; color: var(--fg-3); }
+  .ready-line #readySize { font-family: var(--mono); }
+  .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 14px; }
+  .tag { font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--line-2); color: var(--fg-3); }
+
+  .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+  @media (min-width: 480px) { .actions { flex-direction: row; } }
+  .actions > * { flex: 1; }
+
+  .btn-primary, .btn-ghost, .btn-danger {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    transition: background .12s, border-color .12s, color .12s; white-space: nowrap;
+  }
+  .btn-primary { background: #fff; color: #000; }
+  .btn-primary:hover { background: #d4d4d4; }
+  .btn-ghost { border: 1px solid var(--line-2); color: var(--fg-2); }
+  .btn-ghost:hover { border-color: #333; color: #fff; }
+  .btn-danger { border: 1px solid var(--line-2); color: var(--fg-3); font-size: 11px; padding: 6px 12px; }
+  .btn-danger:hover { border-color: #58181a; color: var(--danger); }
+  .btn-danger:disabled { opacity: .4; cursor: not-allowed; }
+
+  .enc-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: 14px; }
+  #pctText { font-family: var(--mono); font-size: 32px; font-weight: 500; font-variant-numeric: tabular-nums; color: #fff; line-height: 1; }
+  #encStatus { margin-top: 8px; font-size: 12px; color: var(--fg-3); }
+
+  .bar { position: relative; height: 4px; border-radius: 999px; background: var(--line); overflow: hidden; margin-top: 18px; }
+  #barFill { height: 100%; width: 0; border-radius: 999px; background: var(--accent); transition: width .3s ease-out; }
+  #barBox.indet #barFill { width: 34% !important; transition: none; animation: indetSlide 1.15s ease-in-out infinite; }
+  @keyframes indetSlide { 0% { transform: translateX(-110%); } 100% { transform: translateX(290%); } }
+
+  #encFile { margin-top: 10px; font-size: 11px; color: var(--fg-5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 18px; }
+  @media (min-width: 520px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .stat-label { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--fg-5); }
+  .stat-val { margin-top: 3px; font-family: var(--mono); font-size: 11px; color: var(--fg-2); }
+
+  .log-toggle { margin-top: 18px; font-size: 11px; color: var(--fg-4); }
+  .log-toggle:hover { color: var(--fg-2); }
+  .log-wrap { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  #logBox { height: 140px; overflow-y: auto; background: #000; padding: 10px 12px; font-family: var(--mono); font-size: 10px; color: var(--fg-4); }
+  .log-line { white-space: pre-wrap; word-break: break-all; }
+  .log-err { color: #f87171; }
+
+  .done-head { text-align: center; padding-top: 12px; }
+  .done-check { width: 34px; height: 34px; margin: 0 auto; border-radius: 999px; border: 1px solid #0d3d2c; background: #04170f; display: grid; place-items: center; color: var(--accent-2); }
+  .done-check svg { width: 15px; height: 15px; }
+  .done-head h2 { margin-top: 12px; font-size: 15px; font-weight: 600; color: #fff; }
+  #doneElapsed { margin-top: 4px; font-size: 11px; color: var(--fg-3); }
+
+  .compare { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 24px; }
+  @media (min-width: 560px) { .compare { grid-template-columns: 1fr 1fr; } }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .card.is-out { border-color: #0f3a2a; background: #04140f; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; }
+  .card-label { font-size: 10px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--fg-3); }
+  .card.is-out .card-label { color: var(--accent-2); }
+  #doneBadge { font-size: 11px; font-weight: 500; color: var(--fg-3); }
+  #doneBadge.ok { color: var(--accent-2); }
+  #doneBadge.warn { color: var(--warn); }
+  .card-size { margin-top: 8px; font-family: var(--mono); font-size: 20px; font-weight: 500; color: var(--fg-2); }
+  .card.is-out .card-size { color: #fff; }
+  .mini-bar { margin-top: 10px; height: 3px; border-radius: 999px; background: var(--line); overflow: hidden; }
+  .mini-bar > div { height: 100%; width: 0; border-radius: 999px; transition: width .7s ease-out; }
+  #doneOrigBar { background: #404040; }
+  #doneOutBar { background: var(--accent); }
+  .card video { width: 100%; aspect-ratio: 16/9; margin-top: 14px; background: #000; border-radius: 8px; border: 1px solid var(--line); }
+  .card-foot { margin-top: 10px; font-size: 11px; color: var(--fg-5); }
+  #doneSaveNote { margin-top: 16px; text-align: center; font-size: 12px; color: var(--fg-3); }
+
+  .error { max-width: 420px; margin: 24px auto 0; border: 1px solid #3a1518; background: #140406; border-radius: 12px; padding: 22px; text-align: center; }
+  .error-mark { width: 34px; height: 34px; margin: 0 auto; border-radius: 999px; border: 1px solid #3a1518; background: #1e0709; display: grid; place-items: center; color: #f87171; }
+  .error-mark svg { width: 15px; height: 15px; }
+  .error h2 { margin-top: 12px; font-size: 14px; font-weight: 600; color: #fff; }
+  #errMsg { margin-top: 6px; font-size: 12px; color: var(--fg-2); word-break: break-word; }
+  .error .hint { margin-top: 10px; font-size: 11px; color: var(--fg-5); }
+
+  footer { border-top: 1px solid var(--line); padding: 16px 0; font-size: 11px; color: var(--fg-5); text-align: center; }
+  footer .dot { margin: 0 8px; }
+  footer .mono { font-family: var(--mono); }
+
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 8px); padding: 8px 14px; background: #0a0a0a; border: 1px solid var(--line-2); border-radius: 8px; font-size: 12px; color: var(--fg-2); opacity: 0; pointer-events: none; transition: opacity .22s, transform .22s; z-index: 50; white-space: nowrap; }
+  #toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+  @keyframes viewIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .view-in { animation: viewIn .22s cubic-bezier(.22,1,.36,1) both; }
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 9V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v3"/>
+          <path d="M2 15v3a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-3"/>
+          <path d="m9 9 3 3-3 3"/>
+        </svg>
+      </div>
+      <span class="brand-name">ClipPress</span>
+    </div>
+    <div class="engine">
+      <span id="engDot" data-state="idle"></span>
+      <span id="engText">Idle</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="coiWarn" hidden>
+    <strong>SharedArrayBuffer unavailable.</strong> Missing COOP/COEP headers — FFmpeg will run single-threaded.
+  </div>
+</div>
+
+<main class="wrap">
+
+  <section data-view="upload" class="view-in">
+    <div class="hero">
+      <h1>Compress videos without uploading them.</h1>
+      <p>H.264 encoding tuned for TikTok, Reels &amp; Shorts — running entirely on your device. No accounts. No queues. No file-size limits.</p>
+    </div>
+
+    <div id="dropZone" role="button" tabindex="0" class="dropzone">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 13v8"/><path d="m8 17 4-4 4 4"/>
+        <path d="M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.2"/>
+      </svg>
+      <div class="dz-title">Drop your video here</div>
+      <div class="dz-sub">or <span>browse files</span></div>
+      <div class="dz-formats">MP4 · MOV · WebM · MKV · AVI</div>
+      <input id="fileInput" type="file" accept="video/*,.mp4,.mov,.m4v,.webm,.mkv,.avi,.wmv,.flv,.ts,.3gp,.ogv" hidden />
+    </div>
+
+    <div class="features">
+      <div class="feature"><h3>Private by design</h3><p>Frames never leave this tab.</p></div>
+      <div class="feature"><h3>Multi-threaded</h3><p>Uses every CPU core via WASM.</p></div>
+      <div class="feature"><h3>Platform-tuned</h3><p>CRF 22 · 12 Mbps cap.</p></div>
+    </div>
+  </section>
+
+  <section data-view="ready" hidden>
+    <div class="panel">
+      <div class="eyebrow">File loaded</div>
+      <div class="ready-grid">
+        <video id="readyPreview" controls muted playsinline preload="metadata"></video>
+        <div class="ready-meta">
+          <div id="readyName">—</div>
+          <div class="ready-line"><span id="readySize">—</span> · <span id="readyMeta">—</span></div>
+          <div class="tags">
+            <span class="tag">H.264</span><span class="tag">CRF 22</span><span class="tag">12 Mbps</span>
+            <span class="tag">yuv420p</span><span class="tag">AAC 192k</span><span class="tag">+faststart</span>
+          </div>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="btnCompress" class="btn-primary">Compress video</button>
+        <button id="btnChangeFile" class="btn-ghost">Change file</button>
+      </div>
+    </div>
+  </section>
+
+  <section data-view="encoding" hidden>
+    <div class="panel">
+      <div class="eyebrow">Encoding</div>
+      <div class="enc-head">
+        <div style="min-width:0">
+          <div id="pctText">—</div>
+          <div id="encStatus">Preparing…</div>
+        </div>
+        <button id="btnCancel" class="btn-danger">Cancel</button>
+      </div>
+      <div id="barBox" class="bar indet"><div id="barFill"></div></div>
+      <div id="encFile">—</div>
+      <div class="stats">
+        <div class="stat"><div class="stat-label">Progress</div><div id="statTime" class="stat-val">— / —</div></div>
+        <div class="stat"><div class="stat-label">FPS</div><div id="statFps" class="stat-val">—</div></div>
+        <div class="stat"><div class="stat-label">Speed</div><div id="statSpeed" class="stat-val">—</div></div>
+        <div class="stat"><div class="stat-label">Elapsed</div><div id="statElapsed" class="stat-val">00:00</div></div>
+      </div>
+      <button id="btnToggleLog" class="log-toggle">▸ Show FFmpeg log</button>
+      <div id="logWrap" class="log-wrap" hidden><div id="logBox"></div></div>
+    </div>
+  </section>
+
+  <section data-view="done" hidden>
+    <div class="done-head">
+      <div class="done-check">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </div>
+      <h2>Compression complete</h2>
+      <div id="doneElapsed">—</div>
+    </div>
+
+    <div class="compare">
+      <div class="card">
+        <div class="card-head"><div class="card-label">Original</div></div>
+        <div id="doneOrigSize" class="card-size">—</div>
+        <div class="mini-bar"><div id="doneOrigBar"></div></div>
+        <video id="doneOrigVid" controls muted playsinline preload="metadata"></video>
+        <div id="doneMetaOrig" class="card-foot">—</div>
+      </div>
+      <div class="card is-out">
+        <div class="card-head"><div class="card-label">Compressed</div><span id="doneBadge">—</span></div>
+        <div id="doneOutSize" class="card-size">—</div>
+        <div class="mini-bar"><div id="doneOutBar"></div></div>
+        <video id="doneOutVid" controls playsinline preload="metadata"></video>
+        <div class="card-foot">H.264 · CRF 22 · AAC · MP4</div>
+      </div>
+    </div>
+
+    <div id="doneSaveNote">—</div>
+    <div class="actions">
+      <a id="btnDownload" href="#" download class="btn-primary">Download compressed video</a>
+      <button id="btnAgain" class="btn-ghost">Compress another</button>
+    </div>
+  </section>
+
+  <section data-view="error" hidden>
+    <div class="error">
+      <div class="error-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+      </div>
+      <h2>Something went wrong</h2>
+      <div id="errMsg">Unknown error.</div>
+      <div class="hint">Very old containers or DRM-protected files may not be decodable in-browser.</div>
+      <div style="margin-top:16px"><button id="btnRetry" class="btn-ghost">Try again</button></div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  Powered by <span style="color:var(--fg-3)">FFmpeg.wasm</span>
+  <span class="dot">·</span> Videos never leave this tab
+</footer>
+
+<div id="toast"></div>
+
+<script src="./ffmpeg/ffmpeg.js"></script>
+<script src="./ffmpeg/util.js"></script>
+
+<script>
+(function () {
+  'use strict';
+
+  const { FFmpeg }               = FFmpegWASM;
+  const { fetchFile, toBlobURL } = FFmpegUtil;
+
+  const LOCAL_CORE        = './ffmpeg-core/ffmpeg-core.js';
+  const LOCAL_WASM_GZ     = './ffmpeg-core/ffmpeg-core.wasm.gz';
+  const LOCAL_CORE_WORKER = './ffmpeg-core/ffmpeg-core.worker.js';
+
+  const OUTPUT_NAME = 'output.mp4';
+  const IS_ISOLATED = !!window.crossOriginIsolated;
+  const THREADS     = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
+
+  const ENCODE_ARGS = (input, output) => [
+    '-i', input,
+    '-threads', String(THREADS),
+    '-c:v', 'libx264', '-crf', '22', '-preset', 'veryfast',
+    '-pix_fmt', 'yuv420p', '-maxrate', '12M', '-bufsize', '24M',
+    '-c:a', 'aac', '-b:a', '192k',
+    '-movflags', '+faststart',
+    '-y', output,
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  let ffmpeg = null;
+  let encoding = false, cancelled = false;
+  let currentFile = null, sourceUrl = null, sourceDuration = 0, sourceW = 0, sourceH = 0;
+  let outBlob = null, outUrl = null, inputName = 'input.mp4';
+  let officialProgress = 0, logTimeSec = 0, fpsVal = 0, speedVal = 0, t0 = 0, timerId = 0;
+  const encStatusEl = $('encStatus');
+
+  const humanSize = (b) => {
+    const u = ['B','KB','MB','GB','TB']; let i = 0, n = Number(b) || 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return `${n >= 100 || i === 0 ? n.toFixed(0) : n.toFixed(1)} ${u[i]}`;
+  };
+  const fmtTime = (s) => {
+    if (!isFinite(s) || s < 0) s = 0;
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+    return (h ? `${h}:` : '') + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+  };
+  const extOf = (name) => {
+    const m = /\.([a-z0-9]{1,8})$/i.exec(name || '');
+    const e = m ? m[1].toLowerCase() : '';
+    return ['mp4','m4v','mov','webm','mkv','avi','wmv','flv','ts','3gp','ogv'].includes(e) ? e : 'mp4';
+  };
+  const VIDEO_EXT = /\.(mp4|m4v|mov|webm|mkv|avi|wmv|flv|ts|mts|3gp|ogv|ogg)$/i;
+  const isVideoFile = (f) => !!f && ((f.type || '').startsWith('video/') || VIDEO_EXT.test(f.name || ''));
+
+  function friendlyError(err) {
+    const msg = (err && err.message) || String(err || 'Unknown error');
+    if (/out of bounds|out of memory|OOM|RangeError|allocation/i.test(msg))
+      return 'Ran out of memory. WASM has a ~2 GB ceiling shared between input, output and working buffers — try a shorter clip or lower-resolution source.';
+    if (/cancelled/i.test(msg)) return 'Encoding cancelled.';
+    return msg;
+  }
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $('toast'); t.textContent = msg;
+    t.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('on'), 3200);
+  }
+
+  function showView(name) {
+    document.querySelectorAll('[data-view]').forEach((v) => { v.hidden = v.dataset.view !== name; });
+    const el = document.querySelector(`[data-view="${name}"]`);
+    if (el) { el.classList.remove('view-in'); void el.offsetWidth; el.classList.add('view-in'); }
+    document.querySelectorAll('video').forEach((v) => { if (!v.closest(`[data-view="${name}"]`)) v.pause(); });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function setEngineBadge(mode) {
+    const labels = { idle: 'Idle', loading: 'Loading…', mt: 'Multi-thread', st: 'Single-thread' };
+    $('engDot').dataset.state = mode;
+    $('engText').textContent  = labels[mode] || 'Idle';
+  }
+
+  async function ensureEngine() {
+    if (ffmpeg) return ffmpeg;
+    setEngineBadge('loading');
+    try {
+      const inst = new FFmpeg();
+      inst.on('log', onLog);
+      inst.on('progress', onProgressEvent);
+
+      const gzResponse = await fetch(LOCAL_WASM_GZ);
+      if (!gzResponse.ok) throw new Error(`Failed to fetch gzipped WASM: ${gzResponse.status}`);
+      const wasmBlob = new Blob(
+        [await new Response(
+          gzResponse.body.pipeThrough(new DecompressionStream('gzip'))
+        ).arrayBuffer()],
+        { type: 'application/wasm' }
+      );
+
+      const cfg = {
+        coreURL: await toBlobURL(LOCAL_CORE, 'text/javascript'),
+        wasmURL: URL.createObjectURL(wasmBlob),
+      };
+      if (IS_ISOLATED) {
+        cfg.workerURL = await toBlobURL(LOCAL_CORE_WORKER, 'text/javascript');
+      }
+
+      await inst.load(cfg);
+      URL.revokeObjectURL(cfg.wasmURL);
+      ffmpeg = inst;
+      setEngineBadge(IS_ISOLATED ? 'mt' : 'st');
+      return inst;
+    } catch (e) {
+      setEngineBadge('idle');
+      throw new Error('Failed to load FFmpeg core: ' + (e?.message || e));
+    }
+  }
+
+  let paintQueued = false;
+  const scheduleProgressPaint = () => {
+    if (paintQueued) return;
+    paintQueued = true;
+    requestAnimationFrame(() => { paintQueued = false; paintProgress(); });
+  };
+
+  function effectiveProgress() {
+    let p = officialProgress;
+    if (sourceDuration > 0 && logTimeSec > 0) p = Math.max(p, logTimeSec / sourceDuration);
+    if (!Number.isFinite(p) || p <= 0) return null;
+    return Math.min(p, 0.999);
+  }
+
+  function paintProgress() {
+    const p = effectiveProgress();
+    const box = $('barBox');
+    if (p === null) { box.classList.add('indet'); $('pctText').textContent = '…'; }
+    else {
+      box.classList.remove('indet');
+      $('barFill').style.width = (p * 100).toFixed(1) + '%';
+      $('pctText').textContent = (p * 100).toFixed(1) + '%';
+    }
+    $('statTime').textContent = `${fmtTime(logTimeSec)} / ${sourceDuration ? fmtTime(sourceDuration) : '—'}`;
+    $('statFps').textContent   = fpsVal   ? `${fpsVal.toFixed(1)} fps` : '—';
+    $('statSpeed').textContent = speedVal ? `${speedVal.toFixed(2)}×`  : '—';
+  }
+
+  function onProgressEvent({ progress }) {
+    if (Number.isFinite(progress) && progress > officialProgress) officialProgress = progress;
+    scheduleProgressPaint();
+  }
+
+  function appendLog(msg) {
+    const box = $('logBox');
+    const line = document.createElement('div');
+    line.className = 'log-line' + (/error|failed|invalid/i.test(msg) ? ' log-err' : '');
+    line.textContent = msg;
+    box.appendChild(line);
+    while (box.childElementCount > 350) box.firstChild.remove();
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function onLog({ message }) {
+    if (!message) return;
+    appendLog(message);
+    const t = /time=(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(message);
+    if (t) logTimeSec = (+t[1]) * 3600 + (+t[2]) * 60 + parseFloat(t[3]);
+    const f = /fps=\s*([0-9.]+)/.exec(message);
+    if (f) fpsVal = parseFloat(f[1]);
+    const s = /speed=\s*([0-9.]+)x/.exec(message);
+    if (s) speedVal = parseFloat(s[1]);
+    scheduleProgressPaint();
+  }
+
+  function probeVideo(file) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const v = document.createElement('video');
+      v.preload = 'metadata'; v.muted = true; v.playsInline = true; v.src = url;
+      const done = (ok) => resolve(ok
+        ? { url, duration: v.duration, width: v.videoWidth, height: v.videoHeight }
+        : { url, duration: 0, width: 0, height: 0 });
+      v.onloadedmetadata = () => done(true);
+      v.onerror = () => done(false);
+      setTimeout(() => done(false), 15000);
+    });
+  }
+
+  function resetSession() {
+    if (sourceUrl) { URL.revokeObjectURL(sourceUrl); sourceUrl = null; }
+    if (outUrl)    { URL.revokeObjectURL(outUrl);    outUrl = null; }
+    currentFile = null; outBlob = null; sourceDuration = 0; sourceW = 0; sourceH = 0;
+    $('fileInput').value = '';
+  }
+
+  async function handleFile(file) {
+    if (!file) return;
+    if (!isVideoFile(file)) { toast('That does not look like a video. Try MP4, MOV, WebM, MKV…'); return; }
+    resetSession();
+    currentFile = file;
+    const meta = await probeVideo(file);
+    sourceUrl = meta.url;
+    sourceDuration = isFinite(meta.duration) ? meta.duration : 0;
+    sourceW = meta.width; sourceH = meta.height;
+    $('readyName').textContent = file.name;
+    $('readyName').title = file.name;
+    $('readySize').textContent = humanSize(file.size);
+    $('readyMeta').textContent =
+      (sourceW && sourceH ? `${sourceW}×${sourceH} · ` : '') +
+      (sourceDuration ? fmtTime(sourceDuration) : 'duration unavailable');
+    $('readyPreview').src = sourceUrl;
+    showView('ready');
+  }
+
+  async function startCompress() {
+    if (encoding || !currentFile) return;
+    encoding = true; cancelled = false;
+    officialProgress = 0; logTimeSec = 0; fpsVal = 0; speedVal = 0;
+    $('logBox').innerHTML = '';
+    $('barBox').classList.add('indet');
+    $('barFill').style.width = '0%';
+    $('pctText').textContent = '—';
+    $('statElapsed').textContent = '00:00';
+    $('encFile').textContent = `${currentFile.name} · ${humanSize(currentFile.size)}`;
+    encStatusEl.textContent = IS_ISOLATED
+      ? 'Loading multi-threaded FFmpeg engine (first run downloads ~10 MB)…'
+      : 'Loading FFmpeg engine (first run downloads ~10 MB)…';
+    $('btnCancel').disabled = false;
+    showView('encoding');
+
+    try {
+      const ff = await ensureEngine();
+      encStatusEl.textContent = 'Writing input into the WASM virtual file system…';
+      inputName = `input.${extOf(currentFile.name)}`;
+      await ff.writeFile(inputName, await fetchFile(currentFile));
+
+      encStatusEl.textContent = `Encoding · libx264 · CRF 22 · ${THREADS} threads…`;
+      t0 = performance.now();
+      clearInterval(timerId);
+      timerId = setInterval(() => { $('statElapsed').textContent = fmtTime((performance.now() - t0) / 1000); }, 500);
+
+      const code = await ff.exec(ENCODE_ARGS(inputName, OUTPUT_NAME));
+      if (cancelled) throw new Error('Encoding cancelled by user.');
+      if (code !== 0) throw new Error(`FFmpeg exited with code ${code}. Open the log above for details.`);
+
+      encStatusEl.textContent = 'Finalizing…';
+      const data = await ff.readFile(OUTPUT_NAME);
+      outBlob = new Blob([data], { type: 'video/mp4' });
+
+      await ff.deleteFile(inputName).catch(() => {});
+      await ff.deleteFile(OUTPUT_NAME).catch(() => {});
+
+      const elapsed = (performance.now() - t0) / 1000;
+      clearInterval(timerId);
+      encoding = false;
+
+      if (outUrl) URL.revokeObjectURL(outUrl);
+      outUrl = URL.createObjectURL(outBlob);
+      showDone(currentFile.size, outBlob.size, elapsed);
+    } catch (err) {
+      clearInterval(timerId);
+      encoding = false;
+      if (cancelled) {
+        cancelled = false;
+        $('btnCancel').disabled = false;
+        if (ffmpeg) {
+          await ffmpeg.deleteFile(inputName).catch(() => {});
+          await ffmpeg.deleteFile(OUTPUT_NAME).catch(() => {});
+        }
+        showView('ready');
+        toast('Encoding cancelled');
+        return;
+      }
+      console.error(err);
+      $('errMsg').textContent = friendlyError(err);
+      showView('error');
+    }
+  }
+
+  function tween(el, from, to, fmt, dur = 900) {
+    const start = performance.now();
+    (function step(now) {
+      const k = Math.min(1, (now - start) / dur);
+      const e = 1 - Math.pow(1 - k, 3);
+      el.textContent = fmt(from + (to - from) * e);
+      if (k < 1) requestAnimationFrame(step);
+    })(start);
+  }
+
+  function showDone(inB, outB, elapsedSec) {
+    const grew = outB >= inB;
+    const pct = inB > 0 ? Math.max(0, (1 - outB / inB) * 100) : 0;
+
+    $('doneElapsed').textContent = `Encoded in ${fmtTime(elapsedSec)} · ${IS_ISOLATED ? THREADS + '-threaded' : 'single-threaded'}`;
+    $('doneOrigSize').textContent = humanSize(inB);
+    if (!grew) tween($('doneOutSize'), inB, outB, humanSize);
+    else $('doneOutSize').textContent = humanSize(outB);
+
+    const badge = $('doneBadge');
+    if (grew) {
+      badge.textContent = 'No size gain';
+      badge.className = 'warn';
+    } else {
+      badge.textContent = `−${pct.toFixed(1)}%`;
+      badge.className = 'ok';
+    }
+
+    $('doneSaveNote').textContent = grew
+      ? 'The source was already highly optimized — the new file trades size for guaranteed platform compatibility.'
+      : `Saved ${humanSize(inB - outB)} — the output is ${(100 - pct).toFixed(1)}% of the original size.`;
+
+    $('doneMetaOrig').textContent =
+      `${sourceW && sourceH ? `${sourceW}×${sourceH} · ` : ''}${sourceDuration ? fmtTime(sourceDuration) + ' · ' : ''}${humanSize(inB)}`;
+
+    $('doneOrigVid').src = sourceUrl || '';
+    $('doneOutVid').src = outUrl || '';
+
+    const baseName = (currentFile.name || 'video').replace(/\.[^.]*$/, '');
+    const dl = $('btnDownload');
+    dl.href = outUrl;
+    dl.download = `${baseName}-compressed.mp4`;
+
+    const max = Math.max(inB, outB, 1);
+    $('doneOrigBar').style.width = '0%';
+    $('doneOutBar').style.width = '0%';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      $('doneOrigBar').style.width = Math.max(3, (inB / max) * 100).toFixed(1) + '%';
+      $('doneOutBar').style.width = Math.max(3, (outB / max) * 100).toFixed(1) + '%';
+    }));
+
+    showView('done');
+  }
+
+  const dropZone = $('dropZone');
+  dropZone.addEventListener('click', () => $('fileInput').click());
+  dropZone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('fileInput').click(); } });
+  $('fileInput').addEventListener('change', (e) => handleFile(e.target.files?.[0]));
+
+  let dragDepth = 0;
+  dropZone.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; dropZone.classList.add('is-drag'); });
+  dropZone.addEventListener('dragover',  (e) => e.preventDefault());
+  dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) dropZone.classList.remove('is-drag'); });
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault(); dragDepth = 0; dropZone.classList.remove('is-drag');
+    handleFile(e.dataTransfer?.files?.[0]);
+  });
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => e.preventDefault());
+
+  $('btnChangeFile').addEventListener('click', () => { resetSession(); showView('upload'); });
+  $('btnCompress').addEventListener('click', startCompress);
+  $('btnAgain').addEventListener('click', () => { resetSession(); showView('upload'); });
+  $('btnRetry').addEventListener('click', () => showView(currentFile ? 'ready' : 'upload'));
+
+  $('btnToggleLog').addEventListener('click', () => {
+    const wrap = $('logWrap');
+    wrap.hidden = !wrap.hidden;
+    $('btnToggleLog').textContent = wrap.hidden ? '▸ Show FFmpeg log' : '▾ Hide FFmpeg log';
+  });
+
+  $('btnCancel').addEventListener('click', async () => {
+    if (!encoding || !ffmpeg) return;
+    cancelled = true;
+    $('btnCancel').disabled = true;
+    encStatusEl.textContent = 'Cancelling…';
+    try { await ffmpeg.interrupt(); } catch {}
+  });
+
+  window.addEventListener('beforeunload', (e) => { if (encoding) { e.preventDefault(); e.returnValue = ''; } });
+
+  if (!IS_ISOLATED) $('coiWarn').hidden = false;
+  setEngineBadge('idle');
+  showView('upload');
+})();
+</script>
+
+</body>
+</html>
