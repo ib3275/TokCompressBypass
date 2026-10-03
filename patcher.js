@@ -1,16 +1,8 @@
 ﻿/* ════════════════════════════════════════════════════════════════════
-   patcher.js — MP4 container patcher for TikTok compression bypass.
-   Implements the "sample table inflation" technique used by tools like
-   RTX Fury, NoBlur, and tiktok-lossless-upload.
-
-   No video or audio data is re-encoded. Only container metadata is
-   modified. Output is byte-identical media data with an inflated
-   sample table that causes TikTok's transcoder to skip re-encoding.
-
-   ⚠️  EXPERIMENTAL. Use at your own risk. May violate platform ToS.
+   patcher.js — MP4 container patcher.
+   Fixes: filler sizing + valid NAL type.
    ════════════════════════════════════════════════════════════════════ */
 
-/* ── Low-level helpers ────────────────────────────────────────────── */
 const readU32 = (d, o) =>
   ((d[o] << 24) | (d[o+1] << 16) | (d[o+2] << 8) | d[o+3]) >>> 0;
 
@@ -35,7 +27,6 @@ const writeType = (d, o, t) => {
   for (let i = 0; i < 4; i++) d[o + i] = t.charCodeAt(i);
 };
 
-/* ── Box parsing ──────────────────────────────────────────────────── */
 function parseBoxes(data, start, end) {
   const boxes = [];
   let pos = start;
@@ -52,12 +43,8 @@ function parseBoxes(data, start, end) {
     }
     if (size < headerSize || pos + size > end) break;
     boxes.push({
-      type,
-      start: pos,
-      end: pos + size,
-      headerSize,
-      payloadStart: pos + headerSize,
-      payloadEnd: pos + size,
+      type, start: pos, end: pos + size, headerSize,
+      payloadStart: pos + headerSize, payloadEnd: pos + size,
     });
     pos += size;
   }
@@ -79,37 +66,27 @@ function getCodec(data, stsd) {
   return readType(data, stsd.payloadStart + 8);
 }
 
-/* ── Table inflators ──────────────────────────────────────────────── */
-
-/* stts (Time-to-Sample): add one entry covering all ghost frames,
-   each with a 1-unit time delta. */
 function inflateStts(data, stts, ghostCount) {
   const src = data.subarray(stts.payloadStart, stts.payloadEnd);
   const entryCount = readU32(src, 4);
   const origBytes = entryCount * 8;
-
   const out = new Uint8Array(8 + origBytes + 8);
-  out.set(src.subarray(0, 4), 0);          // version + flags
-  writeU32(out, 4, entryCount + 1);        // new entry count
+  out.set(src.subarray(0, 4), 0);
+  writeU32(out, 4, entryCount + 1);
   out.set(src.subarray(8, 8 + origBytes), 8);
-  writeU32(out, 8 + origBytes, ghostCount);     // sample_count
-  writeU32(out, 8 + origBytes + 4, 1);          // sample_delta
+  writeU32(out, 8 + origBytes, ghostCount);
+  writeU32(out, 8 + origBytes + 4, 1);
   return out;
 }
 
-/* stsz (Sample Size): append ghostCount entries of dummySize bytes each. */
 function inflateStsz(data, stsz, ghostCount, dummySize) {
   const src = data.subarray(stsz.payloadStart, stsz.payloadEnd);
   const sampleSize = readU32(src, 4);
   const count = readU32(src, 8);
-
-  if (sampleSize !== 0) {
-    throw new Error('Constant-size stsz not supported');
-  }
-
+  if (sampleSize !== 0) throw new Error('Constant-size stsz not supported');
   const out = new Uint8Array(12 + (count + ghostCount) * 4);
-  out.set(src.subarray(0, 8), 0);          // version+flags + sample_size
-  writeU32(out, 8, count + ghostCount);    // new count
+  out.set(src.subarray(0, 8), 0);
+  writeU32(out, 8, count + ghostCount);
   out.set(src.subarray(12, 12 + count * 4), 12);
   for (let i = 0; i < ghostCount; i++) {
     writeU32(out, 12 + (count + i) * 4, dummySize);
@@ -117,30 +94,26 @@ function inflateStsz(data, stsz, ghostCount, dummySize) {
   return out;
 }
 
-/* stsc (Sample-to-Chunk): add one entry mapping the ghost chunk. */
 function inflateStsc(data, stsc, ghostCount) {
   const src = data.subarray(stsc.payloadStart, stsc.payloadEnd);
   const entryCount = readU32(src, 4);
   const origBytes = entryCount * 12;
   const lastFirstChunk = readU32(src, 8 + (entryCount - 1) * 12);
-
   const out = new Uint8Array(8 + origBytes + 12);
   out.set(src.subarray(0, 4), 0);
   writeU32(out, 4, entryCount + 1);
   out.set(src.subarray(8, 8 + origBytes), 8);
-  writeU32(out, 8 + origBytes,     lastFirstChunk + 1);  // first_chunk
-  writeU32(out, 8 + origBytes + 4, ghostCount);         // samples_per_chunk
-  writeU32(out, 8 + origBytes + 8, 1);                  // sample_description_index
+  writeU32(out, 8 + origBytes,     lastFirstChunk + 1);
+  writeU32(out, 8 + origBytes + 4, ghostCount);
+  writeU32(out, 8 + origBytes + 8, 1);
   return out;
 }
 
-/* stco (32-bit) / co64 (64-bit): append one offset pointing to filler. */
 function inflateStco(data, stco, ghostOffset, is64) {
   const src = data.subarray(stco.payloadStart, stco.payloadEnd);
   const entryCount = readU32(src, 4);
   const entrySize = is64 ? 8 : 4;
   const origBytes = entryCount * entrySize;
-
   const out = new Uint8Array(8 + origBytes + entrySize);
   out.set(src.subarray(0, 4), 0);
   writeU32(out, 4, entryCount + 1);
@@ -150,20 +123,15 @@ function inflateStco(data, stco, ghostOffset, is64) {
   return out;
 }
 
-/* ── Recursive rebuild ────────────────────────────────────────────── */
 function rebuildBox(data, box, replacements) {
   if (replacements.has(box.start)) return replacements.get(box.start);
-
   const children = parseBoxes(data, box.payloadStart, box.payloadEnd);
   const anyDirty = children.some(c => replacements.has(c.start)) ||
                    children.some(c => hasDirtyDescendant(data, c, replacements));
-
   if (!anyDirty) return data.subarray(box.start, box.end);
-
   const childBufs = children.map(c => rebuildBox(data, c, replacements));
   const payloadSize = childBufs.reduce((s, b) => s + b.length, 0);
   const totalSize = box.headerSize + payloadSize;
-
   const out = new Uint8Array(totalSize);
   if (box.headerSize === 16) {
     writeU32(out, 0, 1);
@@ -185,7 +153,6 @@ function hasDirtyDescendant(data, box, replacements) {
   );
 }
 
-/* ── Main entry point ─────────────────────────────────────────────── */
 export async function patchMP4(blob, { inflationFactor = 10 } = {}) {
   const buf = await blob.arrayBuffer();
   const data = new Uint8Array(buf);
@@ -197,6 +164,7 @@ export async function patchMP4(blob, { inflationFactor = 10 } = {}) {
 
   if (!moov) throw new Error('No moov box found — not a valid MP4');
   if (!ftyp) throw new Error('No ftyp box found');
+  if (!mdat) throw new Error('No mdat box found');
 
   const traks = findAllBoxes(data, moov, 'trak');
   let videoTrak = null;
@@ -232,74 +200,50 @@ export async function patchMP4(blob, { inflationFactor = 10 } = {}) {
   const origCount = readU32(data, stsz.payloadStart + 8);
   const ghostCount = Math.max(1, origCount * (inflationFactor - 1));
 
-  /* ── Build filler bytes ── */
-  const filler = new Uint8Array(dummySize);
-  writeU32(filler, 0, dummySize - 4);  // NAL length prefix
-  /* Remaining bytes zero-filled (NAL type 0 = filler, empty payload) */
+  /* ── BUGFIX 1: filler needs dummySize * ghostCount bytes, not just dummySize. ──
+     Otherwise the inflated sample table points past EOF → players reject the file. */
+  const totalFillerSize = dummySize * ghostCount;
+  const filler = new Uint8Array(totalFillerSize);
+  for (let i = 0; i < ghostCount; i++) {
+    const off = i * dummySize;
+    writeU32(filler, off, dummySize - 4);  // NAL length prefix (4 bytes)
+    /* BUGFIX 2: NAL byte 0x0C = nal_unit_type 12 ("filler data").
+       Was 0x00 before, which strict parsers rejected. */
+    filler[off + 4] = 0x0C;
+  }
 
-  /* ── Assemble output: ftyp + original (minus moov) + rebuilt moov + filler ──
-     We keep mdat in place to preserve chunk offsets, unless moov was before
-     mdat — in which case we need to shift all offsets. */
   const moovBeforeMdat = moov.start < mdat.start;
   const outputParts = [];
   let fillerOffset = 0;
 
-  /* Compute the file layout we're going to emit:
-     [ftyp] [moov'] [mdat] [filler]   (if moov originally before mdat)
-     [ftyp] [mdat] [moov'] [filler]   (if moov originally after mdat)
-
-     When moov is emitted BEFORE mdat and grows, all chunk offsets that
-     point into mdat must be shifted by (newMoovSize - oldMoovSize). */
-
-  /* First, build the inflated moov using a provisional offset of 0,
-     then recompute once we know the final layout. */
   function buildMoovWithOffset(shift) {
     const replacements = new Map();
-
-    const newStts = inflateStts(data, stts, ghostCount);
-    const newStsz = inflateStsz(data, stsz, ghostCount, dummySize);
-    const newStsc = inflateStsc(data, stsc, ghostCount);
-    const newStco = inflateStco(data, offsetBox, shift, is64);
-
-    replacements.set(stts.start, newStts);
-    replacements.set(stsz.start, newStsz);
-    replacements.set(stsc.start, newStsc);
-    replacements.set(offsetBox.start, newStco);
-
+    replacements.set(stts.start, inflateStts(data, stts, ghostCount));
+    replacements.set(stsz.start, inflateStsz(data, stsz, ghostCount, dummySize));
+    replacements.set(stsc.start, inflateStsc(data, stsc, ghostCount));
+    replacements.set(offsetBox.start, inflateStco(data, offsetBox, shift, is64));
     return rebuildBox(data, moov, replacements);
   }
 
-  /* Provisional moov to compute size delta */
   const provMoov = buildMoovWithOffset(0);
   const moovDelta = provMoov.length - (moov.end - moov.start);
 
-  /* Now the real moov with correct shifted offsets */
   let realMoov;
   if (moovBeforeMdat) {
-    /* mdat shifts forward by moovDelta. All original chunk offsets
-       need +moovDelta. The filler goes at the very end. */
     const ftypSize = ftyp.end - ftyp.start;
     const mdatSize = mdat.end - mdat.start;
     fillerOffset = ftypSize + provMoov.length + mdatSize;
-
     realMoov = buildMoovWithOffset(moovDelta);
-  } else {
-    /* mdat stays put; only the filler goes at the end. */
-    const ftypSize = ftyp.end - ftyp.start;
-    const preMoovSize = moov.start - ftyp.end;
-    const mdatSize = mdat.end - mdat.start;
-    fillerOffset = ftypSize + preMoovSize + mdatSize + provMoov.length;
-
-    realMoov = buildMoovWithOffset(0);
-  }
-
-  /* ── Emit final file ── */
-  if (moovBeforeMdat) {
     outputParts.push(data.subarray(ftyp.start, ftyp.end));
     outputParts.push(realMoov);
     outputParts.push(data.subarray(mdat.start, mdat.end));
     outputParts.push(filler);
   } else {
+    const ftypSize = ftyp.end - ftyp.start;
+    const preMoovSize = moov.start - ftyp.end;
+    const mdatSize = mdat.end - mdat.start;
+    fillerOffset = ftypSize + preMoovSize + mdatSize + provMoov.length;
+    realMoov = buildMoovWithOffset(0);
     outputParts.push(data.subarray(ftyp.start, ftyp.end));
     outputParts.push(data.subarray(ftyp.end, moov.start));
     outputParts.push(realMoov);
@@ -312,5 +256,6 @@ export async function patchMP4(blob, { inflationFactor = 10 } = {}) {
   let pos = 0;
   for (const part of outputParts) { result.set(part, pos); pos += part.length; }
 
+  console.log(`Patched: origFrames=${origCount} ghostFrames=${ghostCount} filler=${totalFillerSize}B`);
   return new Blob([result], { type: 'video/mp4' });
 }
