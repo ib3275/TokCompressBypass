@@ -33,6 +33,16 @@ const btnAgain       = $('btnAgain');
 const btnRetry       = $('btnRetry');
 const errMsg         = $('errMsg');
 
+/* WebCodecs capability check */
+if (typeof window.VideoEncoder === 'undefined') {
+  alert(
+    'Your browser does not support WebCodecs VideoEncoder. ' +
+    'Please use Chrome, Edge, or Safari 16.4+. ' +
+    'Firefox is not supported.'
+  );
+  throw new Error('VideoEncoder not supported');
+}
+
 const VIDEO_QUALITY = new Quality({ quantizer: 22, bitrate: 12_000_000 });
 const TARGET_WIDTH  = 1920;
 const TARGET_HEIGHT = 1080;
@@ -92,8 +102,11 @@ async function handleFile(file) {
   currentFile = file;
   sourceUrl = URL.createObjectURL(file);
   readyName.textContent = file.name;
-  readySize.textContent = humanSize(file.size);
+  readySize.textContent = humanSize(file.size) + ' · type=' + (file.type || 'unknown');
   readyPreview.src = sourceUrl;
+  showView('ready');
+
+  // Metadata probe (errors visible)
   try {
     const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
     const [duration, videoTrack] = await Promise.all([
@@ -102,7 +115,6 @@ async function handleFile(file) {
     ]);
     let codecInfo = '';
     if (videoTrack) {
-      // Try to expose the source codec (h264, hevc, vp9, ...)
       try {
         const c = await videoTrack.getCodec();
         if (c) codecInfo = ' · ' + c;
@@ -112,10 +124,9 @@ async function handleFile(file) {
     const h = videoTrack ? await videoTrack.getDisplayHeight() : 0;
     readyMeta.textContent = (w && h ? `${w}×${h} · ` : '') + fmtTime(duration) + codecInfo;
   } catch (e) {
-    readyMeta.textContent = 'metadata unavailable';
-    console.warn(e);
+    console.error('Metadata probe failed:', e);
+    readyMeta.textContent = 'metadata unavailable — ' + ((e && e.message) || String(e));
   }
-  showView('ready');
 }
 
 async function startCompress() {
@@ -150,26 +161,18 @@ async function startCompress() {
       },
     });
 
-    // ── Detailed diagnostics ─────────────────────────────────────
     console.log('=== Conversion diagnostics ===');
     console.log('isValid:', conversion.isValid);
     console.log('discardedTracks:', conversion.discardedTracks);
 
-    // Explicitly detect discarded tracks and surface the reason.
     const discarded = conversion.discardedTracks || [];
     const discardedVideo = discarded.find((t) =>
       (t.type || t.trackType || '').toLowerCase().includes('video')
     );
-    const discardedAudio = discarded.find((t) =>
-      (t.type || t.trackType || '').toLowerCase().includes('audio')
-    );
 
     if (discardedVideo) {
       const reason = discardedVideo.reason || discardedVideo.message || JSON.stringify(discardedVideo);
-      throw new Error(
-        'Your device cannot encode the video track. Reason: ' + reason +
-        '. The source codec may be unsupported (HEVC/H.265 is common on Android).'
-      );
+      throw new Error('Video track discarded: ' + reason);
     }
 
     if (conversion.isValid === false) {
@@ -196,12 +199,10 @@ async function startCompress() {
 
     const blob = new Blob([buffer], { type: 'video/mp4' });
 
-    // Sanity check: if output is < 5% of a >1s video, something got dropped.
-    const suspiciouslySmall = blob.size < 100_000 && currentFile.size > 1_000_000;
-    if (suspiciouslySmall) {
+    if (blob.size < 100_000 && currentFile.size > 1_000_000) {
       throw new Error(
-        'Output is only ' + humanSize(blob.size) + ' — the video track was likely dropped. ' +
-        'Check the browser console for the discardedTracks diagnostic.'
+        'Output is only ' + humanSize(blob.size) + ' — video track likely dropped. ' +
+        'Check console for discardedTracks.'
       );
     }
 
@@ -232,9 +233,11 @@ async function startCompress() {
     setEngineBadge('gpu');
     showView('done');
   } catch (err) {
-    console.error(err);
+    console.error('Compression failed:', err);
     setEngineBadge('idle');
-    errMsg.textContent = (err && err.message) || String(err);
+    const msg = (err && err.message) || String(err);
+    const stack = (err && err.stack) ? '\n\n' + err.stack : '';
+    errMsg.textContent = msg + stack;
     showView('error');
   }
 }
