@@ -33,7 +33,6 @@ const btnAgain       = $('btnAgain');
 const btnRetry       = $('btnRetry');
 const errMsg         = $('errMsg');
 
-/* WebCodecs capability check */
 if (typeof window.VideoEncoder === 'undefined') {
   alert(
     'Your browser does not support WebCodecs VideoEncoder. ' +
@@ -106,9 +105,9 @@ async function handleFile(file) {
   readyPreview.src = sourceUrl;
   showView('ready');
 
-  // Metadata probe (errors visible)
   try {
-    const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+    /* useStreamReader: false — works around Android Chrome bugs reading local Blobs */
+    const input = new Input({ source: new BlobSource(file, { useStreamReader: false }), formats: ALL_FORMATS });
     const [duration, videoTrack] = await Promise.all([
       input.computeDuration(),
       input.getPrimaryVideoTrack(),
@@ -139,8 +138,9 @@ async function startCompress() {
   startedAt = performance.now();
 
   try {
+    /* useStreamReader: false — works around Android Chrome bugs reading local Blobs */
     const input = new Input({
-      source: new BlobSource(currentFile),
+      source: new BlobSource(currentFile, { useStreamReader: false }),
       formats: ALL_FORMATS,
     });
     const output = new Output({
@@ -156,7 +156,7 @@ async function startCompress() {
       video: {
         codec: 'avc',
         bitrate: VIDEO_QUALITY,
-        hardwareAcceleration: 'prefer-hardware',
+        // hardwareAcceleration: 'prefer-hardware', // Let browser decide
         resize: { width: TARGET_WIDTH, height: TARGET_HEIGHT },
       },
     });
