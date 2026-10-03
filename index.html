@@ -345,10 +345,8 @@ async function toBlobURL(url, mimeType) {
 
   const LOCAL_CORE        = './ffmpeg-core/ffmpeg-core.js';
   const LOCAL_WASM_GZ     = './ffmpeg-core/ffmpeg-core.wasm.gz';
-  const LOCAL_CORE_WORKER = './ffmpeg-core/ffmpeg-core.worker.js';
-
   const OUTPUT_NAME = 'output.mp4';
-  const IS_ISOLATED = !!window.crossOriginIsolated;
+  const IS_ISOLATED = false;
   const THREADS     = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
 
   const ENCODE_ARGS = (input, output) => [
