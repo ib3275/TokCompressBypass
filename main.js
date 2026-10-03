@@ -46,7 +46,7 @@ const VIDEO_QUALITY = new Quality({ quantizer: 22, bitrate: 12_000_000 });
 const TARGET_WIDTH  = 1920;
 const TARGET_HEIGHT = 1080;
 
-let currentFile = null;
+let currentBlob = null;   // in-memory snapshot; NOT the original File
 let sourceUrl   = null;
 let outUrl      = null;
 let startedAt   = 0;
@@ -87,7 +87,7 @@ function setEngineBadge(mode) {
 function resetSession() {
   if (sourceUrl) { URL.revokeObjectURL(sourceUrl); sourceUrl = null; }
   if (outUrl)    { URL.revokeObjectURL(outUrl);    outUrl = null; }
-  currentFile = null;
+  currentBlob = null;
   fileInput.value = '';
 }
 
@@ -98,16 +98,34 @@ async function handleFile(file) {
     return;
   }
   resetSession();
-  currentFile = file;
-  sourceUrl = URL.createObjectURL(file);
+
   readyName.textContent = file.name;
-  readySize.textContent = humanSize(file.size) + ' · type=' + (file.type || 'unknown');
-  readyPreview.src = sourceUrl;
+  readySize.textContent = humanSize(file.size);
+  readyMeta.textContent = 'reading file…';
   showView('ready');
 
+  /* CRITICAL FIX: read the file's bytes into memory IMMEDIATELY.
+     On Android Chrome, the File object is backed by a temporary
+     content:// URI whose permission expires shortly after selection.
+     Copying the bytes now means we own them for the rest of the session. */
+  let bytes;
   try {
-    /* useStreamReader: false — works around Android Chrome bugs reading local Blobs */
-    const input = new Input({ source: new BlobSource(file, { useStreamReader: false }), formats: ALL_FORMATS });
+    bytes = await file.arrayBuffer();
+  } catch (e) {
+    console.error('Failed to read file:', e);
+    readyMeta.textContent = 'Could not read file: ' + ((e && e.message) || String(e));
+    return;
+  }
+
+  currentBlob = new Blob([bytes], { type: file.type || 'video/mp4' });
+  sourceUrl = URL.createObjectURL(currentBlob);
+  readyPreview.src = sourceUrl;
+
+  try {
+    const input = new Input({
+      source: new BlobSource(currentBlob, { useStreamReader: false }),
+      formats: ALL_FORMATS,
+    });
     const [duration, videoTrack] = await Promise.all([
       input.computeDuration(),
       input.getPrimaryVideoTrack(),
@@ -129,7 +147,7 @@ async function handleFile(file) {
 }
 
 async function startCompress() {
-  if (!currentFile) return;
+  if (!currentBlob) return;
   setEngineBadge('loading');
   pctText.textContent = '—';
   encStatus.textContent = 'Reading file…';
@@ -138,9 +156,8 @@ async function startCompress() {
   startedAt = performance.now();
 
   try {
-    /* useStreamReader: false — works around Android Chrome bugs reading local Blobs */
     const input = new Input({
-      source: new BlobSource(currentFile, { useStreamReader: false }),
+      source: new BlobSource(currentBlob, { useStreamReader: false }),
       formats: ALL_FORMATS,
     });
     const output = new Output({
@@ -156,7 +173,6 @@ async function startCompress() {
       video: {
         codec: 'avc',
         bitrate: VIDEO_QUALITY,
-        // hardwareAcceleration: 'prefer-hardware', // Let browser decide
         resize: { width: TARGET_WIDTH, height: TARGET_HEIGHT },
       },
     });
@@ -199,7 +215,7 @@ async function startCompress() {
 
     const blob = new Blob([buffer], { type: 'video/mp4' });
 
-    if (blob.size < 100_000 && currentFile.size > 1_000_000) {
+    if (blob.size < 100_000 && currentBlob.size > 1_000_000) {
       throw new Error(
         'Output is only ' + humanSize(blob.size) + ' — video track likely dropped. ' +
         'Check console for discardedTracks.'
@@ -210,7 +226,7 @@ async function startCompress() {
     outUrl = URL.createObjectURL(blob);
 
     const elapsed = (performance.now() - startedAt) / 1000;
-    const inB  = currentFile.size;
+    const inB  = currentBlob.size;
     const outB = blob.size;
     const grew = outB >= inB;
     const pct  = inB > 0 ? Math.max(0, (1 - outB / inB) * 100) : 0;
@@ -226,7 +242,7 @@ async function startCompress() {
     doneOrigVid.src = sourceUrl || '';
     doneOutVid.src  = outUrl || '';
 
-    const base = (currentFile.name || 'video').replace(/\.[^.]*$/, '');
+    const base = (readyName.textContent || 'video').replace(/\.[^.]*$/, '');
     btnDownload.href = outUrl;
     btnDownload.download = `${base}-compressed.mp4`;
 
